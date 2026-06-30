@@ -108,7 +108,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 <div id="app">
   <aside id="side">
     <h1>💰 Sistema Financeiro</h1>
-    <div class="sub">Controle de Construtora</div>
+    <div class="sub" id="empNomeHeader">Controle de Construtora</div>
     <div style="padding:10px 14px 12px;border-bottom:1px solid #2c3e50"><div style="font-size:10px;color:#8aa;letter-spacing:.5px;margin-bottom:4px">EMPRESA</div><select id="empSel" style="width:100%;background:#16202d;color:#fff;border:1px solid #2c3e50"></select></div>
     <nav id="nav">
       <a data-v="dash" class="on">📊 Painel</a>
@@ -1245,7 +1245,7 @@ function vDash(){
 }
 
 /* ============ LANÇAMENTOS ============ */
-let LF = { de:'', ate:'', ct:'', tipo:'', pl:'', cc:'', q:'', rec:'', lim:200 };
+let LF = { de:'', ate:'', ct:'', tipo:'', pl:'', cc:'', q:'', rec:'', lim:200, sortCol:'data', sortDir:-1 };
 let MODAL_DOCS = []; // docs buffer durante modal editLanc
 let CF = { status:'', pl:'', cc:'', ct:'', de:'', ate:'', q:'', lim:200 }; // filtros contas a pagar
 let DOCS_SESSION = []; // sessão de upload em lote
@@ -1257,7 +1257,19 @@ function filtLancs(){
     (!LF.pl || lparts(l).some(p=>p.pl === +LF.pl)) && (!LF.cc || lparts(l).some(p=>p.cc === +LF.cc)) &&
     (!LF.rec || (LF.rec==='s') === !!l.fitid) &&
     (!qn || norm(l.fav+' '+l.hist+' '+l.obs).includes(qn))
-  ).sort((a,b)=>(b.data||'').localeCompare(a.data||'')||b.id-a.id);
+  ).sort((a,b)=>{
+    const d = LF.sortDir;
+    switch(LF.sortCol){
+      case 'data':  return d*((a.data||'').localeCompare(b.data||''))||b.id-a.id;
+      case 'fav':   return d*((a.fav||'').localeCompare(b.fav||''));
+      case 'pl':    return d*((planoN(a.pl)||'').localeCompare(planoN(b.pl)||''));
+      case 'cc':    return d*((ccN(a.cc)||'').localeCompare(ccN(b.cc)||''));
+      case 'hist':  return d*((a.hist||'').localeCompare(b.hist||''));
+      case 'ct':    return d*((contaN(a.ct)||'').localeCompare(contaN(b.ct)||''));
+      case 'v':     return d*(a.v - b.v);
+      default:      return d*((a.data||'').localeCompare(b.data||''))||b.id-a.id;
+    }
+  });
 }
 function vLanc(){
   const rows = filtLancs();
@@ -1281,7 +1293,7 @@ function vLanc(){
     <span class="mut sm-t">${rows.length} lançamentos — total: <b class="${tot<0?'neg':'pos'}">${fmt(tot)}</b></span>
   </div>
   <div class="panel"><table>
-    <tr><th>Data</th><th>Favorecido</th><th>Plano de Conta</th><th>Centro de Custo</th><th>Histórico</th><th>Conta</th><th class="r">Valor</th><th></th></tr>
+    <tr>${[['data','Data'],['fav','Favorecido'],['pl','Plano de Conta'],['cc','Centro de Custo'],['hist','Histórico'],['ct','Conta'],['v','Valor']].map(([k,l])=>`<th class="sortable${k==='v'?' r':''}" data-sort="${k}" style="cursor:pointer;user-select:none">${l} ${LF.sortCol===k?(LF.sortDir===1?'↑':'↓'):'↕'}</th>`).join('')}<th></th></tr>
     ${shown.map(l=>`<tr>
       <td>${fmtD(l.data)}</td><td>${esc(l.fav)}</td><td class="sm-t">${l.parts&&l.parts.length?`<span class="badge b-acc" title="${esc(splitTitle(l))}">rateado ×${l.parts.length}</span>`:esc(planoN(l.pl))}</td><td class="sm-t">${l.parts&&l.parts.length?'<span class="mut">vários</span>':esc(ccN(l.cc))}</td>
       <td class="hist" title="${esc(l.hist)}">${esc(l.hist)} ${l.fitid?'<span class="badge b-ok" title="Conciliado via OFX">✓</span>':'<span class="badge b-warn" title="Ainda não conciliado com extrato OFX">⏳</span>'}</td>
@@ -1304,6 +1316,7 @@ function bindLanc(){
     dl('lancamentos.csv', csvOut(rows), 'text/csv');
   };
   const more = $('#b-more'); if(more) more.onclick = ()=>{ LF.lim+=300; render(); };
+  $('#main').querySelectorAll('th[data-sort]').forEach(th=>{ th.onclick=()=>{ const c=th.dataset.sort; LF.sortDir=(LF.sortCol===c?-LF.sortDir:1); LF.sortCol=c; LF.lim=200; render(); }; });
   $('#main').querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editLanc(+b.dataset.ed));
   $('#main').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
     const l = DB.lancs.find(x=>x.id===+b.dataset.del);
@@ -2508,6 +2521,7 @@ function userEmps(){
   return ROOT.empresas.filter(e=>USER.empresas.includes(e.id));
 }
 function refreshSide(){
+  const nh = $('#empNomeHeader'); if(nh) nh.textContent = empAtual().nome;
   const s = $('#empSel');
   if(s){
     const acessiveis = userEmps();
