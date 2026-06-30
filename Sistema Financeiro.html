@@ -163,7 +163,7 @@ function setEmp(id){
     : (ROOT.empresas.find(x=>x.id===id) || ROOT.empresas[0]);
   ROOT.empAtual = e.id; DB = e.db; IDX = null;
 }
-DB = empAtual().db; ROOT.empAtual = empAtual().id; // init sem tocar em IDX (TDZ)
+// DB e ROOT.empAtual são inicializados em bootAsync() via setEmp()
 let saveWarned = false;
 function save(){
   // Sempre salva no localStorage como fallback offline
@@ -2588,7 +2588,7 @@ function boot(){
   else showLogin();
 }
 /* ============ INIT ALIANCE BRASIL APV ============ */
-(function initAlianceBrasil(){
+function initAlianceBrasil(){
   const emp = ROOT.empresas.find(e => e.nome && e.nome.toUpperCase().includes('ALIANCE'));
   if(!emp) return;
   const db = emp.db;
@@ -2694,9 +2694,9 @@ function boot(){
   if(!db.nextId || db.nextId < 7100) db.nextId = 7100;
   try{ localStorage.setItem(KEY, JSON.stringify(ROOT)); }catch(e){}
   console.log('[APV] Aliance Brasil: plano de contas e centros de custo configurados.');
-})();
+}
 
-(function addConsultorias(){
+function addConsultorias(){
   const emp = ROOT.empresas.find(e => e.nome && e.nome.toUpperCase().includes('ALIANCE'));
   if(!emp) return;
   const db = emp.db;
@@ -2717,9 +2717,9 @@ function boot(){
     }
   });
   if(added){ db.planos.sort(planoSort); localStorage.setItem(KEY, JSON.stringify(ROOT)); console.log('[APV] +'+added+' planos de consultoria adicionados.'); }
-})();
+}
 
-(function addRastreamento(){
+function addRastreamento(){
   const emp = ROOT.empresas.find(e => e.nome && e.nome.toUpperCase().includes('ALIANCE'));
   if(!emp) return;
   const db = emp.db;
@@ -2765,9 +2765,9 @@ function boot(){
     added++;
   }
   if(added){ db.planos.sort(planoSort); localStorage.setItem(KEY, JSON.stringify(ROOT)); console.log('[APV] +'+added+' itens de rastreamento adicionados.'); }
-})();
+}
 
-(function addCCAssociados(){
+function addCCAssociados(){
   const emp = ROOT.empresas.find(e => e.nome && e.nome.toUpperCase().includes('ALIANCE'));
   if(!emp) return;
   const db = emp.db;
@@ -2783,7 +2783,7 @@ function boot(){
     }
   });
   if(added){ db.ccustos.sort((a,b)=>a.nome.localeCompare(b.nome)); localStorage.setItem(KEY, JSON.stringify(ROOT)); console.log('[APV] +'+added+' centros de custo de receita adicionados.'); }
-})();
+}
 
 (function initJunho2026(){
   const r = JSON.parse(localStorage.getItem('sfc_construtora_v6')||'null');
@@ -2933,10 +2933,17 @@ async function bootAsync(){
   try{
     ROOT = await loadRoot();
     try{ ROOT = ensurePerfis(ROOT); }catch(e){ console.warn(e); }
-    // run all migration IIFEs that depend on ROOT being loaded
+    setEmp(ROOT.empAtual);
+    // Migrações que dependem de ROOT já carregado
+    try{ initAlianceBrasil(); }catch(e){ console.warn(e); }
+    try{ addConsultorias(); }catch(e){ console.warn(e); }
+    try{ addRastreamento(); }catch(e){ console.warn(e); }
+    try{ addCCAssociados(); }catch(e){ console.warn(e); }
+    if(API_MODE) save(); // persiste migrações no servidor
   }catch(e){
     console.error('Erro ao carregar dados:', e);
     ROOT = { empresas:[{id:1, nome:'EMPRESA PRINCIPAL', db:JSON.parse(JSON.stringify(SEED))}], usuarios:[], cfg:{ai:null}, empAtual:1, lastBkp:null };
+    setEmp(ROOT.empAtual);
   }
   if(loading) loading.style.display='none';
   boot();
