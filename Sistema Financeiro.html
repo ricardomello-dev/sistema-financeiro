@@ -2303,6 +2303,7 @@ async function autoBackup(interactive){
   }catch(e){ console.warn('autoBackup', e); if(interactive) alert('Falha no backup automático: '+e.message); return false; }
 }
 function updateBkBar(){
+  if(!ROOT) return;
   const bar = document.getElementById('bkbar'); if(!bar) return;
   (async()=>{
     if(BKH){
