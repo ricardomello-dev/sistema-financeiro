@@ -2432,15 +2432,13 @@ function vAIStructPanel(){
 
 function vAI(){
   const hasKey = !!aiCfg().key;
-  const chatPanel = hasKey
-    ? `<div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - ${USER&&(USER.admin||hasPerm('adm'))?'560px':'130px'});min-height:320px">`
-    : `<div class="panel">
-        <p>Para usar o chat, configure sua <b>chave de API da Anthropic</b> na aba <b>💾 Backup</b>. Crie a chave em <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> (uso pago por chamada).</p>
-       </div>`;
-  if(!hasKey) return `<h2>Assistente (Claude)</h2>${vAIStructPanel()}${chatPanel}`;
+  const isAdmin = !!(USER && (USER.admin || hasPerm('adm')));
+  const adminPanel = isAdmin ? vAIStructPanel() : '';
+  console.log('[vAI] hasKey='+hasKey+' isAdmin='+isAdmin+' USER='+(USER?JSON.stringify({id:USER.id,nome:USER.nome,admin:USER.admin}):'null')+' adminPanelLen='+adminPanel.length);
+  if(!hasKey) return `<h2>Assistente (Claude)</h2>${adminPanel}<div class="panel"><p>Para usar o chat, configure sua <b>chave de API da Anthropic</b> na aba <b>💾 Backup</b>. Crie a chave em <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> (uso pago por chamada).</p></div>`;
   return `<h2>Assistente (Claude)</h2>
-  ${vAIStructPanel()}
-  <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - ${USER&&(USER.admin||hasPerm('adm'))?'560px':'130px'});min-height:320px">
+  ${adminPanel}
+  <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - ${isAdmin?'560px':'130px'});min-height:320px">
     <p class="sm-t mut" style="margin-bottom:6px">💬 Chat financeiro — pergunte sobre seus lançamentos e relatórios</p>
     <div id="ch-log" style="flex:1;overflow-y:auto;padding:4px">${CHAT.length?CHAT.map(chMsg).join(''):'<p class="mut">Pergunte sobre seus dados: "Quanto gastei com mão de obra em 2025?", "Compare os gastos das obras", "Quem são meus maiores fornecedores?", "Como está o fluxo de caixa este ano?"</p>'}</div>
     <div style="display:flex;gap:8px;margin-top:10px">
