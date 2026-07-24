@@ -2431,7 +2431,13 @@ function vAIStructPanel(){
 }
 
 function vAI(){
-  if(!aiCfg().key) return `<h2>Assistente (Claude)</h2><div class="panel"><p>Para usar o assistente, configure sua <b>chave de API da Anthropic</b> na aba <b>💾 Backup</b>. Crie a chave em console.anthropic.com (uso pago por chamada).</p></div>`;
+  const hasKey = !!aiCfg().key;
+  const chatPanel = hasKey
+    ? `<div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - ${USER&&(USER.admin||hasPerm('adm'))?'560px':'130px'});min-height:320px">`
+    : `<div class="panel">
+        <p>Para usar o chat, configure sua <b>chave de API da Anthropic</b> na aba <b>💾 Backup</b>. Crie a chave em <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> (uso pago por chamada).</p>
+       </div>`;
+  if(!hasKey) return `<h2>Assistente (Claude)</h2>${vAIStructPanel()}${chatPanel}`;
   return `<h2>Assistente (Claude)</h2>
   ${vAIStructPanel()}
   <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - ${USER&&(USER.admin||hasPerm('adm'))?'560px':'130px'});min-height:320px">
