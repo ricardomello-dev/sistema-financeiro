@@ -36,6 +36,7 @@ app.get('/', (req, res) => {
   let html = fs.readFileSync(path.join(__dirname, 'Sistema Financeiro.html'), 'utf8');
   html = html.replace("window._APP_TOKEN || ''", JSON.stringify(TOKEN));
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.send(html);
 });
 app.use(express.static(__dirname));
