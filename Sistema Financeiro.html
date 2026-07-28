@@ -115,8 +115,10 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
       <a data-v="lanc">📒 Lançamentos</a>
       <a data-v="conc">🏦 Conciliação OFX</a>
       <a data-v="rel">📈 Relatórios</a>
+      <a data-v="grupo">🏢 Visão de Grupo</a>
       <a data-v="ai">🤖 Assistente</a>
       <a data-v="cad">🗂️ Cadastros</a>
+      <a data-v="favs">👥 Favorecidos</a>
       <a data-v="adm" id="navAdm" style="display:none">⚙️ Administração</a>
       <a data-v="cpr">💳 Contas a Pagar</a>
       <a data-v="emailcfg">📧 E-mail</a>
@@ -251,7 +253,7 @@ function dl(name, content, mime){ const a=document.createElement('a'); a.href=UR
 function csvOut(rows){ return '﻿'+rows.map(r=>r.map(c=>{ c=String(c==null?'':c); return /[;"\n]/.test(c)?'"'+c.replace(/"/g,'""')+'"':c; }).join(';')).join('\r\n'); }
 function nBR(v){ return v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function selOpts(list, sel, blank){ return (blank?'<option value="">'+blank+'</option>':'') + list.map(o=>`<option value="${o.id}" ${o.id===sel?'selected':''}>${esc(o.nome)}</option>`).join(''); }
-function favList(){ const s=new Set(); DB.lancs.concat(SEED.learn||[]).forEach(l=>{ if(l.fav) s.add(l.fav); }); return [...s].sort(); }
+function favList(){ const s=new Set(); DB.lancs.concat(SEED.learn||[]).forEach(l=>{ if(l.fav) s.add(l.fav); }); (DB.favorecidos||[]).forEach(f=>{ if(f.nome) s.add(f.nome); }); return [...s].sort(); }
 function grupoDe(nome){ return String(nome||'').split(':')[0].trim(); }
 function subDe(nome){ const p=String(nome||'').split(':'); return p.slice(1).join(':').trim(); }
 function tipoOrd(tipo){ return tipo==='R'?0:tipo==='T'?1:2; }
@@ -1101,7 +1103,8 @@ window.editUserPerms = function(id){
   const u=ROOT.usuarios.find(x=>x.id===id); if(!u) return;
   const MODS=[
     {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
-    {k:'rel',l:'📈 Relatórios'},{k:'ai',l:'🤖 Assistente'},{k:'cad',l:'🗂️ Cadastros'},
+    {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
+    {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
     {k:'bkp',l:'💾 Backup'},{k:'adm',l:'⚙️ Administração'}
   ];
@@ -1136,7 +1139,8 @@ window.editPerfil = function(id){
   const pf=id?(ROOT.perfis.find(x=>x.id===id)||null):null;
   const MODS=[
     {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
-    {k:'rel',l:'📈 Relatórios'},{k:'ai',l:'🤖 Assistente'},{k:'cad',l:'🗂️ Cadastros'},
+    {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
+    {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
     {k:'bkp',l:'💾 Backup'},{k:'adm',l:'⚙️ Administração'}
   ];
@@ -1171,8 +1175,10 @@ function render(){
   else if(VIEW==='lanc'){ M.innerHTML = vLanc(); bindLanc(); }
   else if(VIEW==='conc'){ M.innerHTML = vConc(); bindConc(); }
   else if(VIEW==='rel'){ M.innerHTML = vRel(); bindRel(); }
+  else if(VIEW==='grupo'){ M.innerHTML = vGrupo(); bindGrupo(); }
   else if(VIEW==='ai'){ M.innerHTML = vAI(); bindAI(); }
   else if(VIEW==='cad'){ M.innerHTML = vCad(); }
+  else if(VIEW==='favs'){ M.innerHTML = vFavs(); bindFavs(); }
   else if(VIEW==='adm'){ M.innerHTML = vAdm(); bindAdm(); }
   else if(VIEW==='cpr'){ M.innerHTML = vCpr(); bindCpr(); }
   else if(VIEW==='emailcfg'){ M.innerHTML = vEmailCfg(); bindEmailCfg(); }
@@ -1242,6 +1248,365 @@ function vDash(){
       <div style="text-align:right;margin-top:8px"><button class="sec sm" onclick="VIEW='cpr';document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on',x.dataset.v==='cpr'));render()">Ver todas →</button></div>
     </div>`;
   })()}`;
+}
+
+/* ============ GRUPO DE EMPRESAS (visão consolidada) ============ */
+let GF = { gid:null, aba:'painel', de:'', ate:'', emp:'', q:'', lim:200, sortCol:'data', sortDir:-1 };
+let GRUPO_CSV = [];
+
+function grupos(){ if(!ROOT.grupos) ROOT.grupos = []; return ROOT.grupos; }
+function podeGerirGrupos(){ return !!(USER && (USER.admin || hasPerm('adm'))); }
+/* Só enxerga o grupo quem tem acesso a pelo menos uma empresa dele */
+function gruposVisiveis(){
+  const ok = new Set(userEmps().map(e=>e.id));
+  return grupos().filter(g=>(g.empresas||[]).some(id=>ok.has(id)));
+}
+function grupoAtual(){
+  const gs = gruposVisiveis();
+  return gs.find(g=>g.id===GF.gid) || gs[0] || null;
+}
+/* Empresas do grupo que o usuário pode ver */
+function grupoEmpresas(g){
+  if(!g) return [];
+  const ok = new Set(userEmps().map(e=>e.id));
+  return (g.empresas||[])
+    .map(id=>ROOT.empresas.find(e=>e.id===id))
+    .filter(e=>e && ok.has(e.id));
+}
+function empDB(e){ return (e && e.db) || {}; }
+function empSaldo(e){
+  const db = empDB(e);
+  const ini = (db.contas||[]).reduce((s,c)=>s+(c.saldoIni||0),0);
+  return round2(ini + (db.lancs||[]).reduce((s,l)=>s+l.v,0));
+}
+/* Lançamentos de uma empresa dentro do período do filtro de grupo */
+function empLancsPer(e){
+  return (empDB(e).lancs||[]).filter(l=>l.data
+    && (!GF.de  || l.data >= GF.de)
+    && (!GF.ate || l.data <= GF.ate));
+}
+function empStats(e){
+  let rec=0, desp=0; const L = empLancsPer(e);
+  for(const l of L){ if(l.v>0) rec+=l.v; else desp+=l.v; }
+  return { emp:e, n:L.length, rec:round2(rec), desp:round2(desp),
+           res:round2(rec+desp), saldo:empSaldo(e) };
+}
+/* Nomes de plano/centro resolvidos dentro da empresa dona do lançamento */
+function nomeEm(e, lista, id){
+  const x = (empDB(e)[lista]||[]).find(o=>o.id===id);
+  return x ? x.nome : '';
+}
+/* Todos os lançamentos do grupo, cada um marcado com a empresa de origem */
+function grupoLancs(g){
+  const out = [];
+  for(const e of grupoEmpresas(g)){
+    if(GF.emp && e.id !== +GF.emp) continue;
+    for(const l of empLancsPer(e)) out.push({ l, e });
+  }
+  return out;
+}
+
+function vGrupo(){
+  if(!hasPerm('grupo')) return '<h2>🏢 Visão de Grupo</h2><div class="panel"><p>Você não tem permissão para acessar este módulo.</p></div>';
+  const gs = gruposVisiveis(); const g = grupoAtual();
+  if(g) GF.gid = g.id;
+  const gerir = podeGerirGrupos();
+  const head = `<h2>🏢 Visão de Grupo</h2>`;
+  if(!gs.length){
+    return head + `<div class="panel">
+      <p>Nenhum grupo criado ainda. Um grupo reúne várias empresas em uma visão consolidada — saldos somados, comparativo entre elas, lançamentos unificados e relatórios do conjunto.</p>
+      ${gerir ? `<button id="g-novo">+ Criar primeiro grupo</button>`
+              : `<p class="mut sm-t">Peça a um administrador para criar um grupo e incluir suas empresas.</p>`}
+    </div>`;
+  }
+  const emps = grupoEmpresas(g);
+  const abas = [['painel','📊 Painel'],['comp','⚖️ Comparativo'],['lanc','📒 Lançamentos'],['rel','📈 Relatórios']];
+  return head + `
+  <div class="flt">
+    <label>Grupo<select id="g-sel">${gs.map(x=>`<option value="${x.id}" ${x.id===g.id?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></label>
+    <label>De<input type="date" id="g-de" value="${GF.de}"></label>
+    <label>Até<input type="date" id="g-ate" value="${GF.ate}"></label>
+    <span class="sm-t mut" style="align-self:flex-end;padding-bottom:6px">${emps.length} empresa(s) no grupo</span>
+    ${gerir?`<button class="sm sec" id="g-edit" title="Editar empresas do grupo">✏️ Editar grupo</button>
+             <button class="sm sec" id="g-novo">+ Novo grupo</button>`:''}
+  </div>
+  ${periodBtns('gf', GF.de, GF.ate)}
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+    ${abas.map(([k,l])=>`<button class="${GF.aba===k?'':'sec'}" data-gaba="${k}">${l}</button>`).join('')}
+  </div>
+  <div id="g-body">${grupoBody(g)}</div>`;
+}
+
+function grupoBody(g){
+  const emps = grupoEmpresas(g);
+  if(!emps.length) return `<div class="panel"><span class="mut">Este grupo não tem empresas às quais você tenha acesso.</span></div>`;
+  if(GF.aba==='painel') return gPainel(g, emps);
+  if(GF.aba==='comp')   return gComparativo(g, emps);
+  if(GF.aba==='lanc')   return gLancamentos(g);
+  return gRelatorios(g, emps);
+}
+
+/* ── Aba: Painel consolidado ─────────────────────────────────────── */
+function gPainel(g, emps){
+  const st = emps.map(empStats);
+  const saldo = round2(st.reduce((s,x)=>s+x.saldo,0));
+  const rec   = round2(st.reduce((s,x)=>s+x.rec,0));
+  const desp  = round2(st.reduce((s,x)=>s+x.desp,0));
+  const res   = round2(rec+desp);
+  const nl    = st.reduce((s,x)=>s+x.n,0);
+  // gráfico consolidado dos últimos 12 meses (ignora filtro de data)
+  const months=[]; const now=new Date();
+  for(let i=11;i>=0;i--){ const d=new Date(now.getFullYear(), now.getMonth()-i, 1); months.push(d.toISOString().slice(0,7)); }
+  const mm={}; months.forEach(m=>mm[m]={r:0,d:0});
+  emps.forEach(e=>(empDB(e).lancs||[]).forEach(l=>{
+    const m=(l.data||'').slice(0,7); if(mm[m]){ if(l.v>0) mm[m].r+=l.v; else mm[m].d-=l.v; }
+  }));
+  const mx = Math.max(1,...months.map(m=>Math.max(mm[m].r,mm[m].d)));
+  const chart = months.map(m=>`<div class="col"><div class="cb"><div class="vb" style="height:${Math.round(mm[m].r/mx*100)}%;background:var(--ok)" title="Entradas ${fmt(mm[m].r)}"></div><div class="vb" style="height:${Math.round(mm[m].d/mx*100)}%;background:var(--bad)" title="Saídas ${fmt(mm[m].d)}"></div></div><span>${monthName(m)}</span></div>`).join('');
+  const mxs = Math.max(1,...st.map(x=>Math.abs(x.saldo)));
+  const ord = [...st].sort((a,b)=>b.res-a.res);
+  const ult = [];
+  emps.forEach(e=>empLancsPer(e).forEach(l=>ult.push({l,e})));
+  ult.sort((a,b)=>(b.l.data||'').localeCompare(a.l.data||''));
+  return `
+  <div class="cards">
+    <div class="card"><div class="lb">Saldo total do grupo</div><div class="vl ${saldo<0?'neg':'pos'}">${fmt(saldo)}</div><div class="sm-t mut" style="margin-top:2px">${emps.length} empresas</div></div>
+    <div class="card"><div class="lb">Entradas no período</div><div class="vl pos">${fmt(rec)}</div></div>
+    <div class="card"><div class="lb">Saídas no período</div><div class="vl neg">${fmt(desp)}</div></div>
+    <div class="card"><div class="lb">Resultado do período</div><div class="vl ${res<0?'neg':'pos'}">${fmt(res)}</div></div>
+    <div class="card"><div class="lb">Lançamentos no período</div><div class="vl">${nl}</div></div>
+  </div>
+  <div class="panel"><h3 style="margin-top:0">Entradas × Saídas do grupo — últimos 12 meses</h3><div class="chart">${chart}</div></div>
+  <div style="display:flex;gap:18px;flex-wrap:wrap">
+    <div class="panel" style="flex:1.3;min-width:340px"><h3 style="margin-top:0">Saldo por empresa</h3>
+      <table><tr><th>Empresa</th><th style="width:38%"></th><th class="r">Saldo</th></tr>
+      ${st.map(x=>`<tr><td>${esc(x.emp.nome)}</td><td><div class="bar ${x.saldo<0?'b2':''}" style="width:${Math.round(Math.abs(x.saldo)/mxs*100)}%"></div></td><td class="r ${x.saldo<0?'neg':'pos'}">${fmt(x.saldo)}</td></tr>`).join('')}
+      <tr><td><b>Total</b></td><td></td><td class="r"><b class="${saldo<0?'neg':'pos'}">${fmt(saldo)}</b></td></tr></table>
+    </div>
+    <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Resultado no período</h3>
+      <table><tr><th>Empresa</th><th class="r">Resultado</th></tr>
+      ${ord.map(x=>`<tr><td>${esc(x.emp.nome)}</td><td class="r ${x.res<0?'neg':'pos'}">${fmt(x.res)}</td></tr>`).join('')}</table>
+    </div>
+  </div>
+  <div class="panel"><h3 style="margin-top:0">Últimos lançamentos do grupo</h3>
+    <table><tr><th>Data</th><th>Empresa</th><th>Favorecido / Histórico</th><th class="r">Valor</th></tr>
+    ${ult.slice(0,12).map(({l,e})=>`<tr><td>${fmtD(l.data)}</td><td class="sm-t"><span class="badge b-acc">${esc(e.nome)}</span></td><td class="hist" title="${esc(l.hist)}">${esc(l.fav||l.hist)}</td><td class="r ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td></tr>`).join('')}</table>
+  </div>`;
+}
+
+/* ── Aba: Comparativo entre empresas ─────────────────────────────── */
+function gComparativo(g, emps){
+  const st = emps.map(empStats);
+  const tr = round2(st.reduce((s,x)=>s+x.rec,0));
+  const td = round2(st.reduce((s,x)=>s+x.desp,0));
+  const tres = round2(tr+td);
+  const mxr = Math.max(1,...st.map(x=>Math.max(x.rec,Math.abs(x.desp))));
+  GRUPO_CSV = [['Empresa','Entradas','Saídas','Resultado','Margem %','Lançamentos','Saldo atual']];
+  st.forEach(x=>GRUPO_CSV.push([x.emp.nome,nBR(x.rec),nBR(x.desp),nBR(x.res),x.rec?nBR(x.res/x.rec*100):'0,00',x.n,nBR(x.saldo)]));
+  GRUPO_CSV.push(['TOTAL',nBR(tr),nBR(td),nBR(tres),tr?nBR(tres/tr*100):'0,00',st.reduce((s,x)=>s+x.n,0),nBR(round2(st.reduce((s,x)=>s+x.saldo,0)))]);
+  // matriz mês × empresa (resultado)
+  const mset = new Set();
+  emps.forEach(e=>empLancsPer(e).forEach(l=>mset.add(l.data.slice(0,7))));
+  const ms = [...mset].sort();
+  const cell = {};
+  emps.forEach(e=>empLancsPer(e).forEach(l=>{ const k=e.id+'|'+l.data.slice(0,7); cell[k]=round2((cell[k]||0)+l.v); }));
+  return `
+  <div class="panel"><h3 style="margin-top:0">Comparativo no período</h3>
+    <table>
+      <tr><th>Empresa</th><th class="r">Entradas</th><th class="r">Saídas</th><th style="width:22%">Proporção</th><th class="r">Resultado</th><th class="r">Margem</th><th class="r">Lanç.</th><th class="r">Saldo atual</th></tr>
+      ${st.map(x=>`<tr>
+        <td>${esc(x.emp.nome)}</td>
+        <td class="r pos">${fmt(x.rec)}</td>
+        <td class="r neg">${fmt(x.desp)}</td>
+        <td><div style="display:flex;flex-direction:column;gap:2px">
+          <div class="bar" style="width:${Math.round(x.rec/mxr*100)}%;height:9px" title="Entradas ${fmt(x.rec)}"></div>
+          <div class="bar b2" style="width:${Math.round(Math.abs(x.desp)/mxr*100)}%;height:9px" title="Saídas ${fmt(x.desp)}"></div></div></td>
+        <td class="r ${x.res<0?'neg':'pos'}">${fmt(x.res)}</td>
+        <td class="r ${x.res<0?'neg':'pos'}">${x.rec?(x.res/x.rec*100).toFixed(1)+'%':'—'}</td>
+        <td class="r sm-t">${x.n}</td>
+        <td class="r ${x.saldo<0?'neg':'pos'}">${fmt(x.saldo)}</td></tr>`).join('')}
+      <tr><td><b>TOTAL</b></td><td class="r pos"><b>${fmt(tr)}</b></td><td class="r neg"><b>${fmt(td)}</b></td><td></td>
+        <td class="r"><b class="${tres<0?'neg':'pos'}">${fmt(tres)}</b></td>
+        <td class="r"><b>${tr?(tres/tr*100).toFixed(1)+'%':'—'}</b></td>
+        <td class="r sm-t"><b>${st.reduce((s,x)=>s+x.n,0)}</b></td>
+        <td class="r"><b>${fmt(round2(st.reduce((s,x)=>s+x.saldo,0)))}</b></td></tr>
+    </table>
+    <div style="margin-top:10px"><button class="sec" id="g-csv">Exportar CSV</button> <button class="sec" id="g-print">🖨️ Imprimir</button></div>
+  </div>
+  <div class="panel"><h3 style="margin-top:0">Resultado mês a mês por empresa</h3>
+    ${ms.length?`<div style="overflow-x:auto"><table>
+      <tr><th>Mês</th>${emps.map(e=>`<th class="r">${esc(e.nome)}</th>`).join('')}<th class="r">Total</th></tr>
+      ${ms.map(m=>{ let t=0; const tds=emps.map(e=>{ const v=cell[e.id+'|'+m]||0; t=round2(t+v); return `<td class="r ${v<0?'neg':(v>0?'pos':'mut')}">${v?fmt(v):'—'}</td>`; }).join('');
+        return `<tr><td>${monthName(m)}</td>${tds}<td class="r"><b class="${t<0?'neg':'pos'}">${fmt(t)}</b></td></tr>`; }).join('')}
+    </table></div>`:'<span class="mut">Sem lançamentos no período.</span>'}
+  </div>`;
+}
+
+/* ── Aba: Lançamentos unificados ─────────────────────────────────── */
+function gLancamentos(g){
+  const emps = grupoEmpresas(g);
+  const qn = norm(GF.q);
+  let rows = grupoLancs(g).filter(({l})=>!qn || norm((l.fav||'')+' '+(l.hist||'')+' '+(l.obs||'')).includes(qn));
+  const d = GF.sortDir;
+  rows.sort((a,b)=>{
+    switch(GF.sortCol){
+      case 'emp': return d*a.e.nome.localeCompare(b.e.nome);
+      case 'fav': return d*((a.l.fav||'').localeCompare(b.l.fav||''));
+      case 'v':   return d*(a.l.v-b.l.v);
+      default:    return d*((a.l.data||'').localeCompare(b.l.data||''));
+    }
+  });
+  const tot = round2(rows.reduce((s,x)=>s+x.l.v,0));
+  const shown = rows.slice(0, GF.lim);
+  const th = (k,lb,cls)=>`<th class="${cls||''}" data-gsort="${k}" style="cursor:pointer;user-select:none">${lb} ${GF.sortCol===k?(GF.sortDir===1?'↑':'↓'):'↕'}</th>`;
+  return `
+  <div class="flt">
+    <label>Empresa<select id="g-emp"><option value="">Todas do grupo</option>${emps.map(e=>`<option value="${e.id}" ${String(GF.emp)===String(e.id)?'selected':''}>${esc(e.nome)}</option>`).join('')}</select></label>
+    <label>Buscar<input id="g-q" value="${esc(GF.q)}" placeholder="favorecido, histórico..."></label>
+    <button class="sec" id="g-lcsv">Exportar CSV</button>
+    <span class="mut sm-t" style="align-self:flex-end;padding-bottom:6px">Exibindo <b>${shown.length}</b> de <b>${rows.length}</b> — total: <b class="${tot<0?'neg':'pos'}">${fmt(tot)}</b></span>
+  </div>
+  <div class="panel"><table>
+    <tr>${th('data','Data')}${th('emp','Empresa')}${th('fav','Favorecido')}<th>Plano de Conta</th><th>Centro de Custo</th><th>Histórico</th>${th('v','Valor','r')}</tr>
+    ${shown.map(({l,e})=>`<tr>
+      <td>${fmtD(l.data)}</td>
+      <td class="sm-t"><span class="badge b-acc">${esc(e.nome)}</span></td>
+      <td>${esc(l.fav)}</td>
+      <td class="sm-t">${l.parts&&l.parts.length?'rateado ×'+l.parts.length:esc(nomeEm(e,'planos',l.pl))}</td>
+      <td class="sm-t">${l.parts&&l.parts.length?'<span class="mut">vários</span>':esc(nomeEm(e,'ccustos',l.cc))}</td>
+      <td class="hist" title="${esc(l.hist)}">${esc(l.hist)}</td>
+      <td class="r ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td></tr>`).join('')}
+  </table>
+  ${rows.length>shown.length?`<div style="display:flex;gap:8px;justify-content:center;padding:12px;flex-wrap:wrap">
+    <button class="sec" id="g-more">Mostrar mais 300</button>
+    <button class="sec" id="g-all">Mostrar todos (${rows.length})</button>
+    <span class="sm-t mut">${rows.length-shown.length} ainda não exibidos</span></div>`:''}
+  </div>`;
+}
+
+/* ── Aba: Relatórios consolidados ────────────────────────────────── */
+function gRelatorios(g, emps){
+  // fluxo de caixa consolidado
+  const mm={};
+  emps.forEach(e=>empLancsPer(e).forEach(l=>{
+    const m=l.data.slice(0,7); mm[m]=mm[m]||{r:0,d:0};
+    if(l.v>0) mm[m].r+=l.v; else mm[m].d+=l.v;
+  }));
+  const ms=Object.keys(mm).sort(); let acc=0, tr=0, td=0;
+  GRUPO_CSV=[['Mês','Entradas','Saídas','Resultado','Acumulado']];
+  const fluxo = ms.map(m=>{ const x=mm[m]; const res=round2(x.r+x.d); acc=round2(acc+res); tr+=x.r; td+=x.d;
+    GRUPO_CSV.push([monthName(m),nBR(x.r),nBR(x.d),nBR(res),nBR(acc)]);
+    return `<tr><td>${monthName(m)}</td><td class="r pos">${fmt(x.r)}</td><td class="r neg">${fmt(x.d)}</td><td class="r ${res<0?'neg':'pos'}">${fmt(res)}</td><td class="r">${fmt(acc)}</td></tr>`; }).join('');
+  // despesas por centro de custo, agrupadas por nome, com detalhe de empresa
+  const byCC={};
+  emps.forEach(e=>empLancsPer(e).forEach(l=>lparts(l).forEach(p=>{
+    if(p.v>=0) return;
+    const n = nomeEm(e,'ccustos',p.cc) || '(sem centro de custo)';
+    byCC[n]=byCC[n]||{tot:0,por:{}};
+    byCC[n].tot=round2(byCC[n].tot-p.v);
+    byCC[n].por[e.nome]=round2((byCC[n].por[e.nome]||0)-p.v);
+  })));
+  const ccs=Object.entries(byCC).sort((a,b)=>b[1].tot-a[1].tot);
+  const mxcc=Math.max(1,...ccs.map(c=>c[1].tot));
+  // top favorecidos do grupo
+  const byF={};
+  emps.forEach(e=>empLancsPer(e).forEach(l=>{ const f=l.fav||'(sem favorecido)'; byF[f]=round2((byF[f]||0)+l.v); }));
+  const tops=Object.entries(byF).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,15);
+  return `
+  <div class="panel"><h3 style="margin-top:0">Fluxo de caixa consolidado do grupo</h3>
+    ${ms.length?`<table>
+      <tr><th>Mês</th><th class="r">Entradas</th><th class="r">Saídas</th><th class="r">Resultado</th><th class="r">Acumulado</th></tr>
+      ${fluxo}
+      <tr><td><b>Total</b></td><td class="r pos"><b>${fmt(round2(tr))}</b></td><td class="r neg"><b>${fmt(round2(td))}</b></td><td class="r"><b class="${tr+td<0?'neg':'pos'}">${fmt(round2(tr+td))}</b></td><td></td></tr>
+    </table>
+    <div style="margin-top:10px"><button class="sec" id="g-csv">Exportar CSV</button> <button class="sec" id="g-print">🖨️ Imprimir</button></div>`
+    :'<span class="mut">Sem lançamentos no período.</span>'}
+  </div>
+  <div style="display:flex;gap:18px;flex-wrap:wrap">
+    <div class="panel" style="flex:1.2;min-width:340px"><h3 style="margin-top:0">Despesas por centro de custo (grupo)</h3>
+      ${ccs.length?`<table><tr><th>Centro de custo</th><th style="width:32%"></th><th class="r">Total</th></tr>
+        ${ccs.slice(0,15).map(([n,o])=>`<tr><td>${esc(n)}<div class="sm-t mut">${Object.entries(o.por).map(([en,v])=>esc(en)+': '+fmt(v)).join(' · ')}</div></td><td><div class="bar b2" style="width:${Math.round(o.tot/mxcc*100)}%"></div></td><td class="r">${fmt(o.tot)}</td></tr>`).join('')}
+      </table>`:'<span class="mut">Sem despesas no período.</span>'}
+    </div>
+    <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Maiores favorecidos do grupo</h3>
+      ${tops.length?`<table><tr><th>Favorecido</th><th class="r">Total</th></tr>
+        ${tops.map(([n,v])=>`<tr><td>${esc(n)}</td><td class="r ${v<0?'neg':'pos'}">${fmt(v)}</td></tr>`).join('')}
+      </table>`:'<span class="mut">Sem dados no período.</span>'}
+    </div>
+  </div>`;
+}
+
+/* ── Modal: criar / editar grupo ─────────────────────────────────── */
+function editGrupo(id){
+  const g = id ? grupos().find(x=>x.id===id) : { id:null, nome:'', empresas:[] };
+  if(!g) return toast('Grupo não encontrado.');
+  const disp = userEmps();
+  openModal(`<h3>${id?'Editar':'Novo'} grupo de empresas</h3>
+  <div class="fgrid">
+    <label class="full">Nome do grupo<input id="gm-nome" value="${esc(g.nome)}" placeholder="Ex: Grupo Aliance Brasil"></label>
+    <div class="full">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Empresas do grupo</div>
+      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;padding:8px">
+        ${disp.map(e=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:13px;color:var(--tx)">
+          <input type="checkbox" class="gm-emp" value="${e.id}" ${(g.empresas||[]).includes(e.id)?'checked':''} style="width:auto"> ${esc(e.nome)}
+        </label>`).join('')}
+      </div>
+      <p class="sm-t mut" style="margin:6px 0 0">Só aparecem as empresas às quais você tem acesso.</p>
+    </div>
+  </div>
+  <div class="right">
+    ${id?'<button class="sec" id="gm-del" style="margin-right:auto">🗑️ Excluir grupo</button>':''}
+    <button class="sec" onclick="closeModal()">Cancelar</button><button id="gm-save">Salvar</button>
+  </div>`);
+  const del = $('#gm-del');
+  if(del) del.onclick = ()=>{
+    if(!confirm('Excluir o grupo "'+g.nome+'"? As empresas e seus lançamentos não são afetados.')) return;
+    ROOT.grupos = grupos().filter(x=>x.id!==id);
+    GF.gid = null; save(); closeModal(); render(); toast('Grupo excluído.');
+  };
+  $('#gm-save').onclick = ()=>{
+    const nome = $('#gm-nome').value.trim();
+    if(!nome) return alert('Informe o nome do grupo.');
+    const sel = [...document.querySelectorAll('.gm-emp')].filter(c=>c.checked).map(c=>+c.value);
+    if(sel.length<1) return alert('Selecione ao menos uma empresa.');
+    if(id){ g.nome=nome; g.empresas=sel; }
+    else {
+      const nid = grupos().reduce((m,x)=>Math.max(m,x.id),0)+1;
+      grupos().push({ id:nid, nome, empresas:sel, criadoPor:(USER&&USER.id)||null });
+      GF.gid = nid;
+    }
+    save(); closeModal(); render(); toast('Grupo salvo.');
+  };
+}
+
+function bindGrupo(){
+  const novo = $('#g-novo'); if(novo) novo.onclick = ()=>editGrupo(null);
+  const ed   = $('#g-edit'); if(ed)   ed.onclick   = ()=>editGrupo(GF.gid);
+  const sel  = $('#g-sel');  if(sel)  sel.onchange = e=>{ GF.gid=+e.target.value; GF.lim=200; render(); };
+  ['g-de','g-ate'].forEach((id,i)=>{ const el=$('#'+id); if(el) el.onchange = e=>{ GF[i?'ate':'de']=e.target.value; GF.lim=200; render(); }; });
+  bindPeriodBtns('gf', r=>{ GF.de=r.de; GF.ate=r.ate; GF.lim=200; render(); });
+  document.querySelectorAll('[data-gaba]').forEach(b=>b.onclick=()=>{ GF.aba=b.dataset.gaba; GF.lim=200; render(); });
+  const gemp = $('#g-emp'); if(gemp) gemp.onchange = e=>{ GF.emp=e.target.value; GF.lim=200; render(); };
+  const gq = $('#g-q');
+  if(gq) gq.oninput = e=>{ GF.q=e.target.value; GF.lim=200; clearTimeout(window._gqh);
+    window._gqh=setTimeout(()=>{ render(); const n=$('#g-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); };
+  const gm = $('#g-more'); if(gm) gm.onclick = ()=>{ GF.lim+=300; render(); };
+  const ga = $('#g-all');  if(ga) ga.onclick  = ()=>{ GF.lim=1e9; render(); };
+  document.querySelectorAll('[data-gsort]').forEach(t=>t.onclick=()=>{
+    const c=t.dataset.gsort; GF.sortDir=(GF.sortCol===c?-GF.sortDir:1); GF.sortCol=c; GF.lim=200; render();
+  });
+  const pr = $('#g-print'); if(pr) pr.onclick = ()=>window.print();
+  const cs = $('#g-csv');   if(cs) cs.onclick = ()=>dl('grupo_'+GF.aba+'.csv', csvOut(GRUPO_CSV), 'text/csv');
+  const lc = $('#g-lcsv');
+  if(lc) lc.onclick = ()=>{
+    const g = grupoAtual();
+    const rows = [['Data','Empresa','Favorecido','Plano de Conta','Centro de Custo','Conta','Histórico','Valor','Observações']];
+    grupoLancs(g).sort((a,b)=>(b.l.data||'').localeCompare(a.l.data||''))
+      .forEach(({l,e})=>lparts(l).forEach(p=>rows.push([
+        fmtD(l.data), e.nome, l.fav||'', nomeEm(e,'planos',p.pl), nomeEm(e,'ccustos',p.cc),
+        nomeEm(e,'contas',l.ct), (l.hist||'')+(p.d?' — '+p.d:''), nBR(p.v), l.obs||''])));
+    dl('grupo_lancamentos.csv', csvOut(rows), 'text/csv');
+  };
 }
 
 /* ============ LANÇAMENTOS ============ */
@@ -2047,85 +2412,350 @@ function vCad(){
       <p class="mut sm-t" style="margin-top:8px">Cada obra = um centro de custo.</p></div>
   </div>
   <div class="panel" style="margin-top:18px">
-    <h3 style="margin-top:0">Favorecidos / Fornecedores <button class="sm" onclick="cadFav(null)">+ Novo</button></h3>
-    <div style="margin-bottom:10px"><input type="text" id="fav-q" placeholder="Buscar favorecido..." style="width:260px" oninput="renderFavTable(this.value)"></div>
-    <table id="fav-table"><tr><th>Nome</th><th>CPF/CNPJ</th><th>Tipo</th><th>Plano padrão</th><th>Centro padrão</th><th class="r">Usos</th><th></th></tr>
-    ${favTableRows()}
-    </table>
+    <h3 style="margin-top:0">👥 Favorecidos / Fornecedores</h3>
+    <p class="mut sm-t">${(DB.favorecidos||[]).length} cadastrado(s). O cadastro completo — com endereço, telefone, e-mail, colunas personalizadas e importação de planilha — fica em uma tela própria.</p>
+    <button onclick="goFavs()">Abrir cadastro de favorecidos →</button>
   </div>
 `;
 }
+window.goFavs = function(){
+  VIEW='favs';
+  document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on', x.dataset.v==='favs'));
+  render();
+};
+/* ============ FAVORECIDOS (tela dedicada) ============ */
+let FVF = { q:'', tipo:'', sortCol:'nome', sortDir:1 };
+const FAV_TIPOS = ['Fornecedor','Cliente','Colaborador','Sócio','Banco','Governo','Outro'];
 
-function favTableRows(){
-  DB.favorecidos = DB.favorecidos||[];
-  if(!DB.favorecidos.length) return '<tr><td colspan="7" class="mut" style="text-align:center;padding:16px">Nenhum favorecido cadastrado</td></tr>';
-  return DB.favorecidos.sort((a,b)=>(a.nome||'').localeCompare(b.nome||'')).map(f=>{
-    const usos = DB.lancs.filter(l=>(l.fav||'').toUpperCase()===(f.nome||'').toUpperCase()).length;
-    const fid = String(f.id);
-    return `<tr data-fav-nome="${esc(f.nome||'').toLowerCase()}">
-      <td style="font-weight:500">${esc(f.nome)}</td>
-      <td class="mut sm-t">${esc(f.doc||'—')}</td>
+function favs(){ if(!DB.favorecidos) DB.favorecidos = []; return DB.favorecidos; }
+function favCols(){
+  if(!Array.isArray(DB.favCols) || DB.favCols.length!==3)
+    DB.favCols = [1,2,3].map(i=>({ nome:'Coluna '+i, show:false }));
+  return DB.favCols;
+}
+function favColName(i){ return (favCols()[i].nome||'').trim() || ('Coluna '+(i+1)); }
+function soDigitos(s){ return String(s||'').replace(/\D/g,''); }
+/* chave de identidade: documento quando houver, senão o nome normalizado */
+function favKey(f){ const d=soDigitos(f.doc); return d ? 'D:'+d : 'N:'+norm(f.nome); }
+/* contagem de usos calculada uma vez por render (evita varrer os lançamentos por favorecido) */
+let _usoFavMapa = null;
+function usoFavMapa(){
+  if(_usoFavMapa) return _usoFavMapa;
+  const m = {};
+  DB.lancs.forEach(l=>{ const k=norm(l.fav); if(k) m[k]=(m[k]||0)+1; });
+  return (_usoFavMapa = m);
+}
+function usoFav(f){ return usoFavMapa()[norm(f.nome)] || 0; }
+
+function favFiltrados(){
+  const qn = norm(FVF.q);
+  const out = favs().filter(f=>
+    (!FVF.tipo || (f.tipo||'Fornecedor')===FVF.tipo) &&
+    (!qn || norm([f.nome,f.doc,f.email,f.tel,f.endereco,f.x1,f.x2,f.x3].join(' ')).includes(qn))
+  );
+  const d = FVF.sortDir;
+  return out.sort((a,b)=>{
+    switch(FVF.sortCol){
+      case 'doc':   return d*String(a.doc||'').localeCompare(String(b.doc||''));
+      case 'tipo':  return d*String(a.tipo||'').localeCompare(String(b.tipo||''));
+      case 'usos':  return d*(usoFav(a)-usoFav(b));
+      default:      return d*String(a.nome||'').localeCompare(String(b.nome||''));
+    }
+  });
+}
+
+function vFavs(){
+  if(!hasPerm('favs')) return '<h2>👥 Favorecidos</h2><div class="panel"><p>Você não tem permissão para acessar este módulo.</p></div>';
+  _usoFavMapa = null;               // recalcula a cada render
+  const L = favFiltrados();
+  const cols = favCols();
+  const nCols = 9 + cols.filter(c=>c.show).length;
+  const th = (k,lb,cls)=>`<th class="${cls||''}" data-fsort="${k}" style="cursor:pointer;user-select:none">${lb} ${FVF.sortCol===k?(FVF.sortDir===1?'↑':'↓'):'↕'}</th>`;
+  return `<h2>👥 Favorecidos</h2>
+  <div class="flt">
+    <label>Buscar<input id="fv-q" value="${esc(FVF.q)}" placeholder="nome, documento, e-mail, telefone..." style="width:240px"></label>
+    <label>Tipo<select id="fv-tipo"><option value="">Todos</option>${FAV_TIPOS.map(t=>`<option ${FVF.tipo===t?'selected':''}>${t}</option>`).join('')}</select></label>
+    <button id="fv-novo">+ Novo favorecido</button>
+    <button class="sec" id="fv-imp">📥 Importar planilha</button>
+    <button class="sec" id="fv-mod">📄 Baixar modelo</button>
+    <button class="sec" id="fv-exp">Exportar CSV</button>
+    <button class="sec" id="fv-cols">⚙️ Colunas extras</button>
+    <span class="mut sm-t" style="align-self:flex-end;padding-bottom:6px">${L.length} de ${favs().length} favorecidos</span>
+  </div>
+  <input type="file" id="fv-file" accept=".xlsx,.xls,.csv" style="display:none">
+  <div class="panel"><table>
+    <tr>${th('nome','Nome / Razão Social')}${th('doc','CPF / CNPJ')}${th('tipo','Tipo')}
+      <th>Telefone</th><th>E-mail</th><th>Plano padrão</th><th>Centro padrão</th>
+      ${cols.map((c,i)=>c.show?`<th>${esc(favColName(i))}</th>`:'').join('')}
+      ${th('usos','Usos','r')}<th></th></tr>
+    ${L.length?L.map(f=>`<tr>
+      <td style="font-weight:500">${esc(f.nome)}${f.endereco?`<div class="sm-t mut" style="font-weight:400">📍 ${esc(f.endereco)}</div>`:''}</td>
+      <td class="sm-t">${esc(f.doc||'—')}</td>
       <td><span class="badge b-mut">${esc(f.tipo||'Fornecedor')}</span></td>
-      <td class="mut sm-t" style="font-size:12px">${f.pl?esc(planoN(f.pl)):'—'}</td>
-      <td class="mut sm-t" style="font-size:12px">${f.cc?esc(ccN(f.cc)):'—'}</td>
-      <td class="r">${usos}</td>
-      <td style="white-space:nowrap">
-        <button class="sm sec" onclick="cadFav(${JSON.stringify(fid)})">✏️</button>
-        <button class="sm sec" onclick="delFav(${JSON.stringify(fid)})">🗑️</button>
-      </td></tr>`;
-  }).join('');
+      <td class="sm-t">${esc(f.tel||'—')}</td>
+      <td class="sm-t">${f.email?`<a href="mailto:${esc(f.email)}">${esc(f.email)}</a>`:'—'}</td>
+      <td class="sm-t mut">${f.pl?esc(planoN(f.pl)):'—'}</td>
+      <td class="sm-t mut">${f.cc?esc(ccN(f.cc)):'—'}</td>
+      ${cols.map((c,i)=>c.show?`<td class="sm-t">${esc(f['x'+(i+1)]||'—')}</td>`:'').join('')}
+      <td class="r">${usoFav(f)}</td>
+      <td style="white-space:nowrap"><button class="sm sec" data-fed="${esc(f.id)}">✏️</button> <button class="sm sec" data-fdel="${esc(f.id)}">🗑️</button></td>
+    </tr>`).join('')
+    :`<tr><td colspan="${nCols}" class="mut" style="text-align:center;padding:20px">${favs().length?'Nenhum favorecido encontrado com esse filtro.':'Nenhum favorecido cadastrado. Use <b>+ Novo favorecido</b> ou <b>📥 Importar planilha</b>.'}</td></tr>`}
+  </table></div>`;
 }
-function renderFavTable(q){
-  const rows = document.querySelectorAll('#fav-table tr[data-fav-nome]');
-  const qn = (q||'').toLowerCase();
-  rows.forEach(r=>{ r.style.display=(!qn||r.dataset.favNome.includes(qn))?'':'none'; });
+
+/* ── Modal: configurar as 3 colunas coringa ──────────────────────── */
+function cfgFavCols(){
+  const cols = favCols();
+  openModal(`<h3>⚙️ Colunas extras do cadastro</h3>
+  <p class="sm-t mut">Renomeie as três colunas livres conforme sua necessidade (ex.: "Banco", "Chave PIX", "Contato"). Marque para exibi-las na tabela e nos relatórios.</p>
+  <div style="margin:14px 0">
+    ${cols.map((c,i)=>`<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+      <input id="fc-n${i}" value="${esc(c.nome||'')}" placeholder="Coluna ${i+1}" style="flex:1">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--tx);white-space:nowrap">
+        <input type="checkbox" id="fc-s${i}" ${c.show?'checked':''} style="width:auto"> exibir
+      </label>
+    </div>`).join('')}
+  </div>
+  <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="fc-ok">Salvar</button></div>`);
+  $('#fc-ok').onclick = ()=>{
+    for(let i=0;i<3;i++){
+      cols[i].nome = $('#fc-n'+i).value.trim() || ('Coluna '+(i+1));
+      cols[i].show = $('#fc-s'+i).checked;
+    }
+    save(); closeModal(); render(); toast('Colunas atualizadas.');
+  };
 }
+
+/* ── Modal: criar / editar favorecido ────────────────────────────── */
 window.cadFav = function(id){
-  DB.favorecidos = DB.favorecidos||[];
-  const f = id ? DB.favorecidos.find(x=>x.id===id) : null;
-  const tipos = ['Fornecedor','Cliente','Colaborador','Sócio','Banco','Governo','Outro'];
-  openModal(`<h3>${f?'Editar':'Novo'} Favorecido</h3>
-    <label>Nome *<input id="f-nome" value="${esc(f?f.nome:'')}" style="width:100%"></label>
-    <label>CPF / CNPJ<input id="f-doc" value="${esc(f?f.doc||'':'')}" placeholder="000.000.000-00 ou 00.000.000/0001-00"></label>
-    <label>Tipo<select id="f-tipo">${tipos.map(t=>`<option ${(f&&f.tipo===t)?'selected':''}>${t}</option>`).join('')}</select></label>
+  const f = id ? favs().find(x=>String(x.id)===String(id)) : null;
+  if(id && !f) return toast('Favorecido não encontrado.');
+  const cols = favCols();
+  openModal(`<h3>${f?'Editar':'Novo'} favorecido</h3>
+  <div class="fgrid">
+    <label class="full">Nome ou Razão Social *<input id="f-nome" value="${esc(f?f.nome:'')}"></label>
+    <label>CPF ou CNPJ<input id="f-doc" value="${esc(f?(f.doc||''):'')}" placeholder="000.000.000-00 ou 00.000.000/0001-00"></label>
+    <label>Tipo<select id="f-tipo">${FAV_TIPOS.map(t=>`<option ${(f&&f.tipo===t)?'selected':''}>${t}</option>`).join('')}</select></label>
+    <label class="full">Endereço<input id="f-end" value="${esc(f?(f.endereco||''):'')}" placeholder="Rua, número, bairro, cidade/UF, CEP"></label>
+    <label>Telefone<input id="f-tel" value="${esc(f?(f.tel||''):'')}" placeholder="(00) 00000-0000"></label>
+    <label>E-mail<input id="f-mail" type="email" value="${esc(f?(f.email||''):'')}" placeholder="contato@empresa.com.br"></label>
     <label>Plano de conta padrão<select id="f-pl"><option value="">— nenhum —</option>${[...DB.planos].sort(planoSort).map(p=>`<option value="${p.id}" ${f&&f.pl===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select></label>
     <label>Centro de custo padrão<select id="f-cc"><option value="">— nenhum —</option>${DB.ccustos.map(c=>`<option value="${c.id}" ${f&&f.cc===c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select></label>
-    <label>Observação<input id="f-obs" value="${esc(f?(f.obs||''):'' )}" style="width:100%"></label>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="pri" id="f-ok">💾 Salvar</button>
-      <button class="sec" onclick="closeModal()">Cancelar</button>
-    </div>`);
+    ${cols.map((c,i)=>`<label>${esc(favColName(i))}<input id="f-x${i+1}" value="${esc(f?(f['x'+(i+1)]||''):'')}"></label>`).join('')}
+    <label class="full">Observação<input id="f-obs" value="${esc(f?(f.obs||''):'')}"></label>
+  </div>
+  <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="f-ok">💾 Salvar</button></div>`);
   $('#f-ok').onclick = ()=>{
     const nome = $('#f-nome').value.trim();
-    if(!nome) return toast('Informe o nome.');
-    if(f){
-      f.nome=$('#f-nome').value.trim(); f.doc=$('#f-doc').value.trim();
-      f.tipo=$('#f-tipo').value; f.pl=+$('#f-pl').value||null;
-      f.cc=+$('#f-cc').value||null; f.obs=$('#f-obs').value.trim();
-    } else {
-      DB.favorecidos.push({ id:'fav_'+Date.now(), nome:$('#f-nome').value.trim(),
-        doc:$('#f-doc').value.trim(), tipo:$('#f-tipo').value,
-        pl:+$('#f-pl').value||null, cc:+$('#f-cc').value||null,
-        obs:$('#f-obs').value.trim() });
-    }
+    if(!nome) return alert('Informe o nome ou razão social.');
+    const dados = {
+      nome, doc:$('#f-doc').value.trim(), tipo:$('#f-tipo').value,
+      endereco:$('#f-end').value.trim(), tel:$('#f-tel').value.trim(), email:$('#f-mail').value.trim(),
+      pl:+$('#f-pl').value||null, cc:+$('#f-cc').value||null,
+      x1:$('#f-x1').value.trim(), x2:$('#f-x2').value.trim(), x3:$('#f-x3').value.trim(),
+      obs:$('#f-obs').value.trim()
+    };
+    if(f) Object.assign(f, dados);
+    else favs().push(Object.assign({ id:'fav_'+Date.now()+'_'+Math.random().toString(36).slice(2,7) }, dados));
     save(); closeModal(); render(); toast('Favorecido salvo.');
   };
 };
 window.delFav = function(id){
-  DB.favorecidos = DB.favorecidos||[];
-  const f = DB.favorecidos.find(x=>x.id===id);
+  const f = favs().find(x=>String(x.id)===String(id));
   if(!f) return;
-  if(!confirm('Excluir favorecido "'+f.nome+'"?')) return;
-  DB.favorecidos = DB.favorecidos.filter(x=>x.id!==id);
+  const n = usoFav(f);
+  if(!confirm('Excluir o favorecido "'+f.nome+'"?'+(n?'\n\nEle aparece em '+n+' lançamento(s). Os lançamentos NÃO serão apagados — apenas o cadastro.':''))) return;
+  DB.favorecidos = favs().filter(x=>String(x.id)!==String(id));
   save(); render(); toast('Favorecido excluído.');
 };
+
+/* ── Cabeçalhos da planilha ──────────────────────────────────────── */
+function favHeaders(){
+  return ['Nome ou Razão Social','CPF ou CNPJ','Tipo','Endereço','Telefone','E-mail',
+          favColName(0), favColName(1), favColName(2), 'Observação'];
+}
+function favToRow(f){
+  return [f.nome||'', f.doc||'', f.tipo||'Fornecedor', f.endereco||'', f.tel||'', f.email||'',
+          f.x1||'', f.x2||'', f.x3||'', f.obs||''];
+}
+function mapFavHeader(h){
+  const n = norm(h);
+  const eq = (...alts)=>alts.some(a=>norm(a)===n);
+  if(eq('nome ou razao social','nome','razao social','nome/razao social','favorecido','nome completo')) return 'nome';
+  if(eq('cpf ou cnpj','cpf/cnpj','cpf','cnpj','documento','doc','cpf-cnpj')) return 'doc';
+  if(eq('tipo','categoria')) return 'tipo';
+  if(eq('endereco','end','logradouro')) return 'endereco';
+  // as colunas coringa têm prioridade: se o usuário renomeou uma delas para "Contato",
+  // é ela que deve receber o valor, não o campo Telefone
+  for(let i=0;i<3;i++) if(eq(favColName(i),'coluna '+(i+1))) return 'x'+(i+1);
+  if(eq('telefone','tel','fone','celular','contato')) return 'tel';
+  if(eq('e-mail','email','mail')) return 'email';
+  if(eq('observacao','obs','observacoes','notas')) return 'obs';
+  return null;
+}
+
+/* ── Modelo para download ────────────────────────────────────────── */
+const FAV_EXEMPLO = [
+  ['CONSTRUTORA EXEMPLO LTDA','12.345.678/0001-90','Fornecedor','Av. Brasil, 1000, Centro, Belo Horizonte/MG, 30110-000','(31) 3333-4444','contato@exemplo.com.br','','','','Fornecedor de materiais'],
+  ['JOÃO DA SILVA','123.456.789-00','Colaborador','Rua das Flores, 25, Savassi, Belo Horizonte/MG','(31) 99999-8888','joao@email.com','','','','']
+];
+async function baixarModeloFav(){
+  const headers = favHeaders();
+  try{
+    const XLSX = await loadSheetJS();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...FAV_EXEMPLO]);
+    ws['!cols'] = headers.map((h,i)=>({ wch: i===3?45:(i===0?32:20) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Favorecidos');
+    XLSX.writeFile(wb, 'modelo_favorecidos.xlsx');
+    toast('Modelo .xlsx baixado.');
+  }catch(e){
+    dl('modelo_favorecidos.csv', csvOut([headers, ...FAV_EXEMPLO]), 'text/csv');
+    toast('Modelo baixado em CSV (o Excel abre normalmente).');
+  }
+}
+function loadSheetJS(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(window._xlsxLoad) return window._xlsxLoad;
+  window._xlsxLoad = new Promise((res,rej)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload  = ()=> window.XLSX ? res(window.XLSX) : rej(new Error('Biblioteca não inicializou.'));
+    s.onerror = ()=>{ window._xlsxLoad = null; rej(new Error('Sem conexão para carregar o leitor de Excel.')); };
+    document.head.appendChild(s);
+  });
+  return window._xlsxLoad;
+}
+
+/* ── Leitura de arquivo ──────────────────────────────────────────── */
+function parseCSVFav(text){
+  text = String(text).replace(/^﻿/,'');
+  const l1 = text.split(/\r?\n/)[0]||'';
+  const sep = (l1.split(';').length > l1.split(',').length) ? ';' : ',';
+  const rows=[]; let row=[], cur='', q=false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else q=false; }
+      else cur+=c;
+    }else{
+      if(c==='"') q=true;
+      else if(c===sep){ row.push(cur); cur=''; }
+      else if(c==='\n'){ row.push(cur); rows.push(row); row=[]; cur=''; }
+      else if(c!=='\r') cur+=c;
+    }
+  }
+  if(cur!=='' || row.length){ row.push(cur); rows.push(row); }
+  return rows.filter(r=>r.some(c=>String(c).trim()!==''));
+}
+async function lerArquivoFav(file){
+  const nome = (file.name||'').toLowerCase();
+  if(nome.endsWith('.csv')){
+    const txt = await file.text();
+    return parseCSVFav(txt);
+  }
+  const XLSX = await loadSheetJS();
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type:'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { header:1, raw:false, defval:'' })
+    .filter(r=>r.some(c=>String(c).trim()!==''));
+}
+
+/* ── Importação com prévia ───────────────────────────────────────── */
+async function importarFav(file){
+  let rows;
+  try{ rows = await lerArquivoFav(file); }
+  catch(e){ return alert('Não foi possível ler o arquivo.\n\n'+e.message+'\n\nDica: salve a planilha como CSV e tente de novo.'); }
+  if(!rows || rows.length<2) return alert('A planilha está vazia ou só tem o cabeçalho.');
+
+  const heads = rows[0].map(mapFavHeader);
+  if(!heads.includes('nome'))
+    return alert('Não encontrei a coluna de nome.\n\nA primeira linha precisa ter os títulos das colunas — baixe o modelo em "📄 Baixar modelo" para conferir o formato esperado.');
+
+  const existentes = new Map(favs().map(f=>[favKey(f), f]));
+  const novos=[], atualiza=[], ignorados=[];
+  const vistos = new Set();
+  for(const r of rows.slice(1)){
+    const rec = {};
+    heads.forEach((k,i)=>{ if(k) rec[k] = String(r[i]==null?'':r[i]).trim(); });
+    if(!rec.nome){ ignorados.push(r); continue; }
+    // Tipo: normaliza se veio preenchido; se veio vazio, não sobrescreve o cadastro existente
+    if(rec.tipo) rec.tipo = FAV_TIPOS.find(t=>norm(t)===norm(rec.tipo)) || 'Outro';
+    else delete rec.tipo;
+    const k = favKey(rec);
+    if(vistos.has(k)) continue;   // duplicado dentro da própria planilha
+    vistos.add(k);
+    if(existentes.has(k)) atualiza.push({ rec, alvo:existentes.get(k) });
+    else novos.push(rec);
+  }
+  if(!novos.length && !atualiza.length) return alert('Nenhuma linha válida encontrada na planilha.');
+
+  const amostra = [...novos.slice(0,5), ...atualiza.slice(0,5).map(a=>a.rec)];
+  openModal(`<h3>📥 Prévia da importação</h3>
+  <div class="cards" style="margin:12px 0">
+    <div class="card"><div class="lb">Novos</div><div class="vl pos">${novos.length}</div></div>
+    <div class="card"><div class="lb">Já cadastrados</div><div class="vl">${atualiza.length}</div></div>
+    ${ignorados.length?`<div class="card"><div class="lb">Linhas sem nome</div><div class="vl neg">${ignorados.length}</div><div class="sm-t mut" style="margin-top:2px">serão puladas</div></div>`:''}
+  </div>
+  <p class="sm-t mut">Comparação feita pelo CPF/CNPJ quando informado; sem documento, pelo nome.</p>
+  ${amostra.length?`<div style="max-height:200px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;margin:10px 0">
+    <table style="margin:0"><tr><th>Nome</th><th>CPF/CNPJ</th><th>Telefone</th><th>E-mail</th></tr>
+    ${amostra.map(r=>`<tr><td>${esc(r.nome)}</td><td class="sm-t">${esc(r.doc||'—')}</td><td class="sm-t">${esc(r.tel||'—')}</td><td class="sm-t">${esc(r.email||'—')}</td></tr>`).join('')}
+    </table></div><p class="sm-t mut">Amostra das primeiras linhas.</p>`:''}
+  <div class="right" style="flex-wrap:wrap;gap:8px">
+    <button class="sec" onclick="closeModal()">Cancelar</button>
+    ${novos.length?`<button class="sec" id="fi-novos">Importar só os ${novos.length} novos</button>`:''}
+    <button id="fi-tudo">${atualiza.length?`Importar novos e atualizar os ${atualiza.length} existentes`:`Importar ${novos.length} favorecidos`}</button>
+  </div>`);
+
+  const aplicar = (comAtualizacao)=>{
+    novos.forEach(r=>favs().push(Object.assign(
+      { id:'fav_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), tipo:'Fornecedor', pl:null, cc:null }, r)));
+    let nAt = 0;
+    if(comAtualizacao) atualiza.forEach(({rec,alvo})=>{
+      Object.keys(rec).forEach(k=>{ if(rec[k]!=='') alvo[k]=rec[k]; });  // não apaga o que veio vazio
+      nAt++;
+    });
+    save(); closeModal(); render();
+    toast(novos.length+' novo(s) importado(s)'+(nAt?', '+nAt+' atualizado(s)':'')+'.');
+  };
+  const bn = $('#fi-novos'); if(bn) bn.onclick = ()=>aplicar(false);
+  $('#fi-tudo').onclick = ()=>aplicar(true);
+}
+
+function bindFavs(){
+  if(!hasPerm('favs')) return;
+  const q = $('#fv-q');
+  if(q) q.oninput = e=>{ FVF.q=e.target.value; clearTimeout(window._fvq);
+    window._fvq=setTimeout(()=>{ render(); const n=$('#fv-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); };
+  const t = $('#fv-tipo'); if(t) t.onchange = e=>{ FVF.tipo=e.target.value; render(); };
+  $('#fv-novo').onclick = ()=>cadFav(null);
+  $('#fv-cols').onclick = ()=>cfgFavCols();
+  $('#fv-mod').onclick  = ()=>baixarModeloFav();
+  $('#fv-exp').onclick  = ()=>dl('favorecidos.csv', csvOut([favHeaders(), ...favFiltrados().map(favToRow)]), 'text/csv');
+  const file = $('#fv-file');
+  $('#fv-imp').onclick = ()=>file.click();
+  file.onchange = async e=>{
+    const f = e.target.files[0]; e.target.value='';
+    if(f) await importarFav(f);
+  };
+  document.querySelectorAll('[data-fsort]').forEach(el=>el.onclick=()=>{
+    const c=el.dataset.fsort; FVF.sortDir=(FVF.sortCol===c?-FVF.sortDir:1); FVF.sortCol=c; render();
+  });
+  document.querySelectorAll('[data-fed]').forEach(b=>b.onclick=()=>cadFav(b.dataset.fed));
+  document.querySelectorAll('[data-fdel]').forEach(b=>b.onclick=()=>delFav(b.dataset.fdel));
+}
+
 function vAdm(){
   if(!USER || !hasPerm('adm')) return '<h2>Administração</h2><div class="panel"><p>Acesso restrito a administradores.</p></div>';
   const tab = window._admTab||'usuarios';
   const tabs = [{k:'usuarios',l:'👤 Usuários'},{k:'perfis',l:'🎭 Perfis'},{k:'empresas',l:'🏢 Empresas'}];
   const MODS = [
     {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
-    {k:'rel',l:'📈 Relatórios'},{k:'ai',l:'🤖 Assistente'},{k:'cad',l:'🗂️ Cadastros'},
+    {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
+    {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
     {k:'bkp',l:'💾 Backup'},{k:'adm',l:'⚙️ Administração'}
   ];
@@ -2463,7 +3093,7 @@ function vAIStructPanel(){
       <label style="display:flex;align-items:flex-end"><span class="sm-t mut">A estrutura criada substituirá planos e centros de custo existentes</span></label>
     </div>
     <label style="display:block;margin-bottom:10px">Descreva o negócio da empresa
-      <textarea id="st-desc" rows="3" style="width:100%;margin-top:4px;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--brd);border-radius:6px;resize:vertical" placeholder="Ex: Empresa de logística e transporte de cargas, com frota própria de 30 caminhões. Atende clientes industriais e do agronegócio em todo o Brasil. Possui filial em SP e MG..."></textarea>
+      <textarea id="st-desc" rows="3" style="width:100%;margin-top:4px;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--bd);border-radius:6px;resize:vertical" placeholder="Ex: Empresa de logística e transporte de cargas, com frota própria de 30 caminhões. Atende clientes industriais e do agronegócio em todo o Brasil. Possui filial em SP e MG..."></textarea>
     </label>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button id="st-gen">🤖 Gerar estrutura com IA</button>
@@ -2677,10 +3307,17 @@ $('#modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeMo
 function ensurePerfis(r){
   if(!r.perfis||!r.perfis.length) r.perfis=[
     {id:1,nome:'Administrador',desc:'Acesso total ao sistema',cor:'#4a90d9',perms:{all:true}},
-    {id:2,nome:'Financeiro',desc:'Lançamentos, conciliação e relatórios',cor:'#27ae60',perms:{dash:true,lanc:true,conc:true,rel:true,ai:true,cad:true,docs:true,cpr:true,emailcfg:true,bkp:true,adm:false}},
-    {id:3,nome:'Contador',desc:'Somente relatórios e documentos',cor:'#8e44ad',perms:{dash:true,lanc:false,conc:false,rel:true,ai:false,cad:false,docs:true,cpr:false,emailcfg:false,bkp:false,adm:false}},
-    {id:4,nome:'Visualização',desc:'Somente leitura do painel',cor:'#95a5a6',perms:{dash:true,lanc:false,conc:false,rel:true,ai:false,cad:false,docs:false,cpr:false,emailcfg:false,bkp:false,adm:false}}
+    {id:2,nome:'Financeiro',desc:'Lançamentos, conciliação e relatórios',cor:'#27ae60',perms:{dash:true,lanc:true,conc:true,rel:true,grupo:true,ai:true,cad:true,favs:true,docs:true,cpr:true,emailcfg:true,bkp:true,adm:false}},
+    {id:3,nome:'Contador',desc:'Somente relatórios e documentos',cor:'#8e44ad',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:true,ai:false,cad:false,favs:false,docs:true,cpr:false,emailcfg:false,bkp:false,adm:false}},
+    {id:4,nome:'Visualização',desc:'Somente leitura do painel',cor:'#95a5a6',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,adm:false}}
   ];
+  // Migração: perfis salvos antes dos módulos Grupo e Favorecidos herdam de Relatórios e Cadastros
+  r.perfis.forEach(p=>{
+    if(!p.perms) p.perms = {};
+    if(p.perms.all) return;
+    if(p.perms.grupo === undefined) p.perms.grupo = !!p.perms.rel;
+    if(p.perms.favs  === undefined) p.perms.favs  = !!p.perms.cad;
+  });
   r.usuarios.forEach(u=>{ if(!u.perfilId) u.perfilId=u.admin?1:2; });
   return r;
 }
@@ -2712,7 +3349,7 @@ function refreshSide(){
     s.onchange = e=>{ setEmp(+e.target.value); save(); render(); toast('Empresa: '+empAtual().nome); };
   }
   const na = $('#navAdm'); if(na) na.style.display = (USER && hasPerm('adm')) ? 'block' : 'none';
-  ['lanc','conc','rel','ai','cad','cpr','emailcfg','docs','bkp'].forEach(mod=>{
+  ['lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','bkp'].forEach(mod=>{
     const el=document.querySelector(`#nav [data-v="${mod}"]`);
     if(el) el.style.display = hasPerm(mod)?'':'none';
   });
