@@ -18,6 +18,10 @@ body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);colo
 #side nav a.on{background:var(--side2);color:#fff;border-left-color:var(--acc)}
 #side .ft{padding:12px 16px;font-size:10.5px;color:#667}
 #main{flex:1;padding:22px 26px;min-width:0}
+#empbar{background:var(--acc);color:#fff;padding:7px 26px;font-size:12.5px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:inset 0 -2px 0 rgba(0,0,0,.15)}
+#empbar .et{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;opacity:.8}
+#empbar .en{font-size:14.5px;font-weight:600;letter-spacing:.2px}
+.tema-sw{width:54px;height:36px;border-radius:6px;overflow:hidden;border:3px solid transparent;box-shadow:0 0 0 1px var(--bd)}
 h2{font-size:19px;margin-bottom:14px}
 h3{font-size:15px;margin:16px 0 8px}
 .cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
@@ -65,7 +69,7 @@ button.ok{background:var(--ok)} button.bad{background:var(--bad)} button.sm{padd
 #toast{position:fixed;bottom:20px;right:20px;background:#2d3748;color:#fff;padding:11px 18px;border-radius:8px;font-size:13px;display:none;z-index:99;max-width:380px}
 details summary{cursor:pointer;font-weight:600;padding:4px 0}
 .hist{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media print{#side,.flt,.toolbar,button,.noprint{display:none!important}#main{padding:0}body{background:#fff}.panel{border:none;padding:0}}
+@media print{#side,#empbar,.flt,.toolbar,button,.noprint{display:none!important}#main{padding:0}body{background:#fff}.panel{border:none;padding:0}}
 @media(max-width:760px){#app{flex-direction:column}#side{width:100%}#side nav{display:flex;flex-wrap:wrap}#side nav a{border-left:none}}
 
 /* Documentos */
@@ -127,7 +131,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     </nav>
     <div class="ft" id="userBox"></div>
   </aside>
-  <div style="flex:1;display:flex;flex-direction:column;min-width:0"><div id="bkbar" style="display:none"></div><main id="main" style="flex:1"></main></div>
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0"><div id="empbar"></div><div id="bkbar" style="display:none"></div><main id="main" style="flex:1"></main></div>
 </div>
 <div id="modalBg"><div id="modal"></div></div>
 <div id="toast"></div>
@@ -158,12 +162,40 @@ async function loadRoot(){
   return { empresas:[{id:1, nome:'EMPRESA PRINCIPAL', db:JSON.parse(JSON.stringify(SEED))}], usuarios:[], cfg:{ai:null}, empAtual:1, lastBkp:null };
 }
 function empAtual(){ return ROOT.empresas.find(e=>e.id===ROOT.empAtual) || ROOT.empresas[0]; }
+
+/* ---- Temas por empresa: cor diferente evita lançar na empresa errada ---- */
+const TEMAS = [
+  { k:'azul',     nome:'Azul',     side:'#1e2a3a', side2:'#16202d', acc:'#2f80ed', bg:'#f4f6f9' },
+  { k:'verde',    nome:'Verde',    side:'#1b3a2f', side2:'#142b23', acc:'#1e8e5a', bg:'#f1f8f4' },
+  { k:'vinho',    nome:'Vinho',    side:'#3a1f28', side2:'#2b171e', acc:'#b03050', bg:'#fbf4f6' },
+  { k:'grafite',  nome:'Grafite',  side:'#2b2f36', side2:'#20242a', acc:'#5a6673', bg:'#f5f6f8' },
+  { k:'roxo',     nome:'Roxo',     side:'#2e2444', side2:'#231b34', acc:'#7c4dbd', bg:'#f7f4fc' },
+  { k:'laranja',  nome:'Laranja',  side:'#3a2a1c', side2:'#2b1f15', acc:'#d97014', bg:'#fdf6ef' },
+  { k:'petróleo', nome:'Petróleo', side:'#14313a', side2:'#0e242b', acc:'#0e8fa8', bg:'#eff8fa' },
+  { k:'terra',    nome:'Terra',    side:'#33301f', side2:'#262417', acc:'#8a7420', bg:'#faf8ee' }
+];
+function temaDe(e){ return TEMAS.find(t=>t.k===(e&&e.tema)) || TEMAS[0]; }
+function updateEmpBar(){
+  const eb = document.getElementById('empbar');
+  if(!eb || !ROOT || !USER){ if(eb) eb.style.display='none'; return; }
+  const e = empAtual(); if(!e) return;
+  eb.style.display = '';
+  eb.innerHTML = `<span class="et">Empresa ativa</span><span class="en">${esc(e.nome)}</span>`
+    + (e.cnpj?`<span style="opacity:.85">CNPJ ${esc(e.cnpj)}</span>`:'')
+    + `<span style="margin-left:auto;opacity:.85">${(e.db&&e.db.lancs?e.db.lancs.length:0)} lançamentos</span>`;
+}
+function aplicarTema(e){
+  const t = temaDe(e), r = document.documentElement.style;
+  r.setProperty('--side', t.side); r.setProperty('--side2', t.side2);
+  r.setProperty('--acc',  t.acc);  r.setProperty('--bg',    t.bg);
+}
 function setEmp(id){
   const allowed = userEmps();
   const e = (USER && !USER.admin && USER.empresas && USER.empresas.length>0)
     ? (allowed.find(x=>x.id===id) || allowed[0] || ROOT.empresas[0])
     : (ROOT.empresas.find(x=>x.id===id) || ROOT.empresas[0]);
   ROOT.empAtual = e.id; DB = e.db; IDX = null;
+  aplicarTema(e);
 }
 // DB e ROOT.empAtual são inicializados em bootAsync() via setEmp()
 let saveWarned = false;
@@ -1171,6 +1203,8 @@ window.editPerfil = function(id){
 };
 function render(){
   const M = $('#main');
+  if(ROOT) aplicarTema(empAtual());   // garante que o tema volte ao da empresa após qualquer prévia
+  updateEmpBar();
   if(VIEW==='dash') M.innerHTML = vDash();
   else if(VIEW==='lanc'){ M.innerHTML = vLanc(); bindLanc(); }
   else if(VIEW==='conc'){ M.innerHTML = vConc(); bindConc(); }
@@ -1727,6 +1761,10 @@ function editLanc(id, ofx){
   const l = id ? DB.lancs.find(x=>x.id===id) : { id:null, data:ofx?ofx.data:today(), tipo:ofx?(ofx.v<0?'P':'D'):'P', fav:ofx?(ofx.fav||''):'', pl:ofx?(ofx.pl||''):'', cc:ofx?(ofx.cc||''):'', ct:ofx?ofx.ct:DB.contas[0].id, hist:ofx?ofx.hist:'', v:ofx?ofx.v:0, st:'C', obs:'', fitid:null, parts:null };
   const hasParts = !!(l.parts && l.parts.length);
   openModal(`<h3>${id?'Editar':'Novo'} lançamento${ofx?' (OFX)':''}</h3>
+  <div style="display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding:7px 11px;background:var(--acc);color:#fff;border-radius:6px;font-size:12.5px">
+    <span style="opacity:.85;text-transform:uppercase;font-size:10.5px;letter-spacing:.6px">Empresa</span>
+    <b style="font-size:13.5px">${esc(empAtual().nome)}</b>
+  </div>
   ${id&&l.fitid?`<div style="background:#eafaf1;border:1px solid #bfe8d2;border-radius:6px;padding:8px 10px;font-size:12.5px;margin-top:8px"><span class="badge b-ok">✓ conciliado</span> <span id="m-lockmsg">Data, valor, tipo e conta travados (casados com o banco). Histórico, favorecido, plano, centro de custo, rateio e observações podem ser editados.</span> <button class="sm sec" id="m-unlock" type="button">Desfazer conciliação</button></div>`:''}
   <div class="fgrid">
     <label>Data<input type="date" id="m-data" value="${l.data||''}"></label>
@@ -2814,11 +2852,13 @@ function vAdm(){
       <button onclick="cadEmp(null)">+ Nova empresa</button>
     </div>
     <div class="panel"><table>
-      <tr><th>Nome</th><th>CNPJ</th><th class="r">Lançamentos</th><th class="r">Contas</th><th>Usuários</th><th></th></tr>
+      <tr><th>Nome</th><th>Tema</th><th>CNPJ</th><th class="r">Lançamentos</th><th class="r">Contas</th><th>Usuários</th><th></th></tr>
       ${ROOT.empresas.map(e=>{
         const usrs=ROOT.usuarios.filter(u=>!u.empresas||u.empresas.length===0||u.empresas.includes(e.id));
+        const t=temaDe(e);
         return `<tr>
           <td>${esc(e.nome)} ${e.id===ROOT.empAtual?'<span class="badge b-ok">atual</span>':''}</td>
+          <td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:34px;height:16px;border-radius:4px;background:linear-gradient(90deg,${t.side} 50%,${t.acc} 50%);box-shadow:0 0 0 1px var(--bd)"></span><span class="sm-t mut">${t.nome}</span></span></td>
           <td class="sm-t mut">${esc(e.cnpj||'—')}</td>
           <td class="r">${e.db.lancs.length}</td>
           <td class="r">${e.db.contas.length}</td>
@@ -2842,13 +2882,33 @@ window.cadEmp = id => { const e = id?ROOT.empresas.find(x=>x.id===id):null;
     <label class="full">Nome<input id="e-n" value="${esc(e?e.nome:'')}" placeholder="Razão social ou apelido"></label>
     <label class="full">CNPJ (opcional)<input id="e-cj" value="${esc(e&&e.cnpj?e.cnpj:'')}" placeholder="00.000.000/0000-00"></label>
     ${id?'':`<label class="full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="e-cp" checked style="width:auto"> Copiar plano de contas e centros de custo da empresa atual</label>`}
-  </div><div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="e-ok">Salvar</button></div>`);
-  $('#e-ok').onclick=()=>{ const n=$('#e-n').value.trim(); if(!n) return alert('Informe o nome.');
-    if(id){ e.nome=n; e.cnpj=$('#e-cj').value.trim(); }
+    <div class="full">
+      <div style="font-size:11.5px;color:var(--mut);margin-bottom:6px">Tema de cor desta empresa</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${TEMAS.map(t=>`<label style="cursor:pointer;text-align:center">
+          <input type="radio" name="e-tema" value="${t.k}" ${temaDe(e).k===t.k?'checked':''} style="display:none">
+          <div class="tema-sw" data-tk="${t.k}" style="border-color:${temaDe(e).k===t.k?'var(--tx)':'transparent'}">
+            <div style="height:62%;background:${t.side}"></div><div style="height:38%;background:${t.acc}"></div>
+          </div>
+          <div style="font-size:10px;color:var(--mut);margin-top:3px">${t.nome}</div>
+        </label>`).join('')}
+      </div>
+      <p class="sm-t mut" style="margin:8px 0 0">Cada empresa com uma cor própria: a tela inteira muda ao trocar de empresa, deixando claro onde você está lançando.</p>
+    </div>
+  </div><div class="right"><button class="sec" id="e-cancel">Cancelar</button><button id="e-ok">Salvar</button></div>`);
+  const temaOrig = temaDe(empAtual()).k;
+  const marcado = ()=>{ const r=document.querySelector('input[name="e-tema"]:checked'); return r?r.value:'azul'; };
+  document.querySelectorAll('input[name="e-tema"]').forEach(r=>r.onchange=()=>{
+    document.querySelectorAll('.tema-sw').forEach(sw=>sw.style.borderColor = sw.dataset.tk===r.value?'var(--tx)':'transparent');
+    aplicarTema({ tema:r.value });   // prévia ao vivo
+  });
+  $('#e-cancel').onclick = ()=>{ aplicarTema({ tema:temaOrig }); closeModal(); };
+  $('#e-ok').onclick=()=>{ const n=$('#e-n').value.trim(); if(!n){ alert('Informe o nome.'); return; }
+    if(id){ e.nome=n; e.cnpj=$('#e-cj').value.trim(); e.tema=marcado(); }
     else{
       const cp=$('#e-cp').checked;
       const nid=ROOT.empresas.reduce((m,x)=>Math.max(m,x.id),0)+1;
-      ROOT.empresas.push({id:nid, nome:n, cnpj:$('#e-cj').value.trim(), db:{
+      ROOT.empresas.push({id:nid, nome:n, cnpj:$('#e-cj').value.trim(), tema:marcado(), db:{
         contas:[{id:1,nome:'Caixa',saldoIni:0,banco:''}],
         planos: cp?JSON.parse(JSON.stringify(DB.planos)):[{id:1,nome:'Receitas',tipo:'R'},{id:2,nome:'Despesas',tipo:'D'},{id:3,nome:'Transferência',tipo:'T'}],
         ccustos: cp?JSON.parse(JSON.stringify(DB.ccustos)):[{id:1,nome:'Administração'}],
@@ -2857,6 +2917,7 @@ window.cadEmp = id => { const e = id?ROOT.empresas.find(x=>x.id===id):null;
       setEmp(nid);
       toast('Empresa criada — você já está nela.');
     }
+    aplicarTema(empAtual());
     save(); refreshSide(); closeModal(); render(); };
 };
 window.delEmp = id => {
@@ -3346,8 +3407,18 @@ function refreshSide(){
     const acessiveis = userEmps();
     s.innerHTML = acessiveis.map(e=>`<option value="${e.id}" ${e.id===ROOT.empAtual?'selected':''}>${esc(e.nome)}</option>`).join('');
     s.style.display = acessiveis.length<=1 ? 'none' : '';
-    s.onchange = e=>{ setEmp(+e.target.value); save(); render(); toast('Empresa: '+empAtual().nome); };
+    s.onchange = ev=>{
+      const alvo = ROOT.empresas.find(x=>x.id === +ev.target.value);
+      if(!alvo || alvo.id === ROOT.empAtual) return;
+      const de = empAtual().nome;
+      if(!confirm('Trocar de empresa?\n\nDe:    '+de+'\nPara:  '+alvo.nome+
+                  '\n\nA partir de agora, todo lançamento será gravado em "'+alvo.nome+'".')){
+        ev.target.value = ROOT.empAtual; return;
+      }
+      setEmp(alvo.id); save(); refreshSide(); render(); toast('Empresa ativa: '+alvo.nome);
+    };
   }
+  updateEmpBar();
   const na = $('#navAdm'); if(na) na.style.display = (USER && hasPerm('adm')) ? 'block' : 'none';
   ['lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','bkp'].forEach(mod=>{
     const el=document.querySelector(`#nav [data-v="${mod}"]`);
