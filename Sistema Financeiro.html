@@ -1249,6 +1249,34 @@ let LF = { de:'', ate:'', ct:'', tipo:'', pl:'', cc:'', q:'', rec:'', lim:200, s
 let MODAL_DOCS = []; // docs buffer durante modal editLanc
 let CF = { status:'', pl:'', cc:'', ct:'', de:'', ate:'', q:'', lim:200 }; // filtros contas a pagar
 let DOCS_SESSION = []; // sessão de upload em lote
+/* ── Atalhos de período (Lançamentos e Relatórios) ────────────────── */
+function periodRange(kind){
+  const d = new Date(), y = d.getFullYear(), m = d.getMonth()+1;
+  const p2 = n => String(n).padStart(2,'0');
+  const ld = (yy,mm) => new Date(yy, mm, 0).getDate();
+  switch(kind){
+    case 'mes': return { de:`${y}-${p2(m)}-01`, ate:`${y}-${p2(m)}-${p2(ld(y,m))}` };
+    case 'ano': return { de:`${y}-01-01`, ate:`${y}-12-31` };
+    case 'ant': return { de:`${y-1}-01-01`, ate:`${y-1}-12-31` };
+    case 'm12': { const s = new Date(y, d.getMonth()-11, 1);
+                  return { de:`${s.getFullYear()}-${p2(s.getMonth()+1)}-01`, ate:`${y}-${p2(m)}-${p2(ld(y,m))}` }; }
+    default:    return { de:'', ate:'' };
+  }
+}
+function periodBtns(pfx, de, ate){
+  const cur = (de||'')+'|'+(ate||'');
+  return `<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
+    <span class="sm-t mut">Período rápido:</span>
+    ${[['mes','Este mês'],['ano','Este ano'],['ant','Ano passado'],['m12','Últimos 12 meses'],['tudo','Todo o período']]
+      .map(([k,l])=>{ const r=periodRange(k); const on=((r.de||'')+'|'+(r.ate||''))===cur;
+        return `<button type="button" class="sm ${on?'':'sec'}" data-per="${pfx}:${k}">${l}</button>`; }).join(' ')}
+  </div>`;
+}
+function bindPeriodBtns(pfx, apply){
+  document.querySelectorAll('[data-per^="'+pfx+':"]').forEach(b=>{
+    b.onclick = ()=> apply(periodRange(b.dataset.per.split(':')[1]));
+  });
+}
 function filtLancs(){
   const qn = norm(LF.q);
   return DB.lancs.filter(l =>
@@ -1287,10 +1315,11 @@ function vLanc(){
     <label>Buscar<input id="f-q" value="${esc(LF.q)}" placeholder="favorecido, histórico..."></label>
     <button class="sec" id="f-clr">Limpar</button>
   </div>
+  ${periodBtns('lf', LF.de, LF.ate)}
   <div class="toolbar">
     <button id="b-novo">+ Novo lançamento</button>
     <button class="sec" id="b-csv">Exportar CSV</button>
-    <span class="mut sm-t">${rows.length} lançamentos — total: <b class="${tot<0?'neg':'pos'}">${fmt(tot)}</b></span>
+    <span class="mut sm-t">Exibindo <b>${shown.length}</b> de <b>${rows.length}</b> lançamentos — total: <b class="${tot<0?'neg':'pos'}">${fmt(tot)}</b></span>
   </div>
   <div class="panel"><table>
     <tr>${[['data','Data'],['fav','Favorecido'],['pl','Plano de Conta'],['cc','Centro de Custo'],['hist','Histórico'],['ct','Conta'],['v','Valor']].map(([k,l])=>`<th class="sortable${k==='v'?' r':''}" data-sort="${k}" style="cursor:pointer;user-select:none">${l} ${LF.sortCol===k?(LF.sortDir===1?'↑':'↓'):'↕'}</th>`).join('')}<th></th></tr>
@@ -1301,14 +1330,18 @@ function vLanc(){
       <td style="white-space:nowrap"><button class="sm sec" data-ed="${l.id}">✏️</button> <button class="sm sec" data-del="${l.id}">🗑️</button>${l.docs&&l.docs.length?` <span class="badge b-acc" title="${l.docs.length} doc(s) anexado(s)">📎 ${l.docs.length}</span>`:''}</td>
     </tr>`).join('')}
   </table>
-  ${rows.length>LF.lim?`<div style="text-align:center;padding:10px"><button class="sec" id="b-more">Mostrar mais (${rows.length-LF.lim} restantes)</button></div>`:''}
+  ${rows.length>shown.length?`<div style="display:flex;gap:8px;justify-content:center;align-items:center;padding:12px;flex-wrap:wrap">
+    <button class="sec" id="b-more">Mostrar mais 300</button>
+    <button class="sec" id="b-all">Mostrar todos (${rows.length})</button>
+    <span class="sm-t mut">${rows.length-shown.length} lançamentos ainda não exibidos</span>
+  </div>`:''}
   </div>`;
 }
 function bindLanc(){
   const re = ()=>{ render(); };
   [['f-de','de'],['f-ate','ate'],['f-ct','ct'],['f-tipo','tipo'],['f-pl','pl'],['f-cc','cc'],['f-rec','rec']].forEach(([id,k])=>{ $('#'+id).onchange = e=>{ LF[k]=e.target.value; LF.lim=200; re(); }; });
   $('#f-q').oninput = e=>{ LF.q=e.target.value; LF.lim=200; clearTimeout(window._qh); window._qh=setTimeout(re,300); };
-  $('#f-clr').onclick = ()=>{ LF={de:'',ate:'',ct:'',tipo:'',pl:'',cc:'',q:'',rec:'',lim:200}; re(); };
+  $('#f-clr').onclick = ()=>{ LF={de:'',ate:'',ct:'',tipo:'',pl:'',cc:'',q:'',rec:'',lim:200,sortCol:'data',sortDir:-1}; re(); };
   $('#b-novo').onclick = ()=>editLanc(null);
   $('#b-csv').onclick = ()=>{
     const rows = [['Data','Tipo','Favorecido','Plano de Conta','Centro de Custo','Conta','Histórico','Valor','Observações']];
@@ -1316,6 +1349,8 @@ function bindLanc(){
     dl('lancamentos.csv', csvOut(rows), 'text/csv');
   };
   const more = $('#b-more'); if(more) more.onclick = ()=>{ LF.lim+=300; render(); };
+  const ball = $('#b-all'); if(ball) ball.onclick = ()=>{ LF.lim = 1e9; render(); };
+  bindPeriodBtns('lf', r=>{ LF.de=r.de; LF.ate=r.ate; LF.lim=200; render(); });
   $('#main').querySelectorAll('th[data-sort]').forEach(th=>{ th.onclick=()=>{ const c=th.dataset.sort; LF.sortDir=(LF.sortCol===c?-LF.sortDir:1); LF.sortCol=c; LF.lim=200; render(); }; });
   $('#main').querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editLanc(+b.dataset.ed));
   $('#main').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
@@ -1650,12 +1685,14 @@ function vRel(){
     <label>Centro de custo<select id="r-cc"><option value="">Todos</option>${[...DB.ccustos].sort((a,b)=>a.nome.localeCompare(b.nome)).map(c=>`<option value="${c.id}" ${RF.cc==c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select></label>
     <label>Favorecido/Histórico<input type="text" id="r-fav" value="${esc(RF.fav)}" placeholder="buscar..." style="width:140px"></label>
     <label>Tipo<select id="r-tipo-mov"><option value="" ${RF.tipo_mov===''?'selected':''}>Todos</option><option value="R" ${RF.tipo_mov==='R'?'selected':''}>Receitas</option><option value="D" ${RF.tipo_mov==='D'?'selected':''}>Despesas</option></select></label>
+    <button id="r-gerar" title="Aplicar os filtros e montar o relatório">📊 Gerar relatório</button>
     <button class="sm sec" id="r-limpar" title="Limpar filtros">✖ Limpar</button>
     <button class="sec" id="r-print">🖨️ Imprimir</button>
     <button class="sec" id="r-csv">Exportar CSV</button>
     ${RF.tipo==='contabil'?'<button class="pri" id="r-zip">📦 Exportar para Contabilidade</button>':''}
     ${aiCfg().key?'<button class="sec" id="r-ai">🤖 Analisar</button>':''}
   </div>
+  ${periodBtns('rf', RF.de, RF.ate)}
   <div class="panel noprint" id="r-aiout" style="display:none"></div>
   <div class="panel" id="r-out">${relBody()}</div>`;
 }
@@ -1962,7 +1999,9 @@ function bindRel(){
     const el=$('#'+id); if(el) el.onchange = e=>{ RF[k]=e.target.value; $('#r-out').innerHTML=relBody(); };
   });
   const rfav=$('#r-fav'); if(rfav){ let _t; rfav.oninput=e=>{ clearTimeout(_t); _t=setTimeout(()=>{ RF.fav=e.target.value; $('#r-out').innerHTML=relBody(); },350); }; }
-  const rlimpar=$('#r-limpar'); if(rlimpar) rlimpar.onclick=()=>{ RF={...RF,ct:'',pl:'',cc:'',fav:'',tipo_mov:''}; $('#main').innerHTML=vRel(); bindRel(); };
+  const rger=$('#r-gerar'); if(rger) rger.onclick=()=>{ $('#r-out').innerHTML=relBody(); toast('Relatório gerado.'); };
+  bindPeriodBtns('rf', r=>{ RF.de=r.de; RF.ate=r.ate; $('#main').innerHTML=vRel(); bindRel(); });
+  const rlimpar=$('#r-limpar'); if(rlimpar) rlimpar.onclick=()=>{ RF={...RF,ct:'',pl:'',cc:'',fav:'',tipo_mov:'',de:'',ate:''}; $('#main').innerHTML=vRel(); bindRel(); };
   $('#r-print').onclick = ()=>window.print();
   $('#r-csv').onclick = ()=>{ relBody(); dl('relatorio_'+RF.tipo+'.csv', csvOut(REL_CSV), 'text/csv'); };
   const rzip = $('#r-zip'); if(rzip) rzip.onclick = ()=>{ relBody(); exportContabilZip(); };
@@ -2363,10 +2402,32 @@ function aiContext(){
   }
   const dump=o=>Object.entries(o).map(([k,v])=>k+': '+v).join('\n');
   const topF=Object.entries(byF).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,60).map(([k,v])=>k+': '+v).join('\n');
-  return 'Saldos por conta:\n'+DB.contas.map(c=>c.nome+': '+saldoConta(c.id)).join('\n')
+  // ── Lançamentos individuais (recentes + maiores valores, sem duplicar) ──
+  const LIM = 600;
+  const todos = DB.lancs.filter(l=>l.data).sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  let sel, nota;
+  if(todos.length<=LIM){
+    sel = todos; nota = 'todos os '+todos.length;
+  }else{
+    const recentes = todos.slice(0,350);
+    const maiores  = [...todos].sort((a,b)=>Math.abs(b.v)-Math.abs(a.v)).slice(0,250);
+    const vistos = new Set(); sel = [];
+    for(const l of [...recentes,...maiores]) if(!vistos.has(l.id)){ vistos.add(l.id); sel.push(l); }
+    sel.sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+    nota = 'amostra de '+sel.length+' de '+todos.length+' (os mais recentes e os de maior valor)';
+  }
+  const linha = l => [l.data, l.v, (l.fav||'').slice(0,40),
+      (l.parts&&l.parts.length ? 'rateado' : planoN(l.pl)||'-'),
+      (l.parts&&l.parts.length ? 'vários'  : ccN(l.cc)||'-'),
+      (l.hist||'').replace(/[\r\n]+/g,' ').slice(0,70)].join(' | ');
+  const periodo = todos.length ? todos[todos.length-1].data+' a '+todos[0].data : 'sem lançamentos';
+  return 'Empresa: '+(ROOT.empresas.find(e=>e.id===ROOT.empAtual)||{}).nome
+    +'\nTotal de lançamentos: '+DB.lancs.length+'. Período coberto: '+periodo
+    +'\n\nSaldos por conta:\n'+DB.contas.map(c=>c.nome+': '+saldoConta(c.id)).join('\n')
     +'\n\nTotais mensais por plano de conta (mês | plano: valor):\n'+dump(byMP)
     +'\n\nTotais mensais por centro de custo (mês | centro: valor):\n'+dump(byMC)
     +'\n\nTotal por favorecido (top 60):\n'+topF
+    +'\n\nLançamentos individuais — '+nota+'\nFormato: data | valor | favorecido | plano de conta | centro de custo | histórico\n'+sel.map(linha).join('\n')
     +'\n\nHoje: '+today()+'. Valores em reais (R$); negativos = despesas/saídas, positivos = receitas/entradas.';
 }
 async function aiClassify(items){
@@ -2435,7 +2496,6 @@ function vAI(){
   const hasKey = !!aiCfg().key;
   const isAdmin = !!(USER && (USER.admin || hasPerm('adm')));
   const adminPanel = isAdmin ? vAIStructPanel() : '';
-  console.log('[vAI] hasKey='+hasKey+' isAdmin='+isAdmin+' USER='+(USER?JSON.stringify({id:USER.id,nome:USER.nome,admin:USER.admin}):'null')+' adminPanelLen='+adminPanel.length);
   if(!hasKey) return `<h2>Assistente (Claude)</h2>${adminPanel}<div class="panel"><p>Para usar o chat, configure sua <b>chave de API da Anthropic</b> na aba <b>💾 Backup</b>. Crie a chave em <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> (uso pago por chamada).</p></div>`;
   return `<h2>Assistente (Claude)</h2>
   ${adminPanel}
@@ -2528,7 +2588,7 @@ REGRAS:
     log.innerHTML = CHAT.map(chMsg).join('') + '<div class="mut sm-t">🤖 pensando…</div>'; log.scrollTop=1e9;
     inp.disabled=true;
     try{
-      const sys = 'Você é o assistente financeiro de uma construtora brasileira. Responda em português, de forma objetiva, com valores em reais. Baseie-se exclusivamente nos dados agregados abaixo (extraídos do sistema financeiro do usuário). Se a pergunta exigir um detalhe que não está nos dados, diga isso e sugira onde ver no sistema (abas Lançamentos ou Relatórios).\n\n'+aiContext();
+      const sys = 'Você é o assistente financeiro de uma construtora brasileira. Responda em português, de forma objetiva, com valores em reais. Baseie-se exclusivamente nos dados abaixo, extraídos do sistema financeiro do usuário: há totais agregados por mês e também uma lista de lançamentos individuais. Ao citar um lançamento específico, informe a data e o favorecido. Se a lista de lançamentos for uma amostra e a pergunta exigir algo fora dela, diga isso claramente e sugira filtrar nas abas Lançamentos ou Relatórios.\n\n'+aiContext();
       const txt = await askClaude(sys, CHAT.slice(-12), 1500);
       CHAT.push({role:'assistant',content:txt});
     }catch(e){ CHAT.push({role:'assistant',content:'⚠️ Erro: '+e.message}); }
