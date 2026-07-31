@@ -127,6 +127,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
       <a data-v="cpr">💳 Contas a Pagar</a>
       <a data-v="emailcfg">📧 E-mail</a>
       <a data-v="docs">📎 Documentos</a>
+      <a data-v="contab">📤 Contabilidade</a>
       <a data-v="bkp">💾 Backup</a>
     </nav>
     <div class="ft" id="userBox"></div>
@@ -1138,7 +1139,8 @@ window.editUserPerms = function(id){
     {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
     {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
-    {k:'bkp',l:'💾 Backup'},{k:'adm',l:'⚙️ Administração'}
+    {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
+    {k:'saldos',l:'💰 Ver saldos das contas'}
   ];
   const pf=perfil(u);
   openModal(`<h3>🔑 Permissões — ${esc(u.nome)}</h3>
@@ -1163,7 +1165,7 @@ window.editUserPerms = function(id){
     const pfId=+$('#pp-pf').value; const pf2=(ROOT.perfis||[]).find(x=>x.id===pfId);
     u.perfilId=pfId; u.admin=!!(pf2&&pf2.perms&&pf2.perms.all);
     if(!ROOT.usuarios.some(x=>x.admin)){ u.admin=true; u.perfilId=1; alert('É preciso manter ao menos um administrador.'); }
-    save(); closeModal(); render(); toast('Permissões atualizadas.');
+    save(); closeModal(); refreshSide(); render(); toast('Permissões atualizadas.');
   };
 };
 window.editPerfil = function(id){
@@ -1174,7 +1176,8 @@ window.editPerfil = function(id){
     {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
     {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
-    {k:'bkp',l:'💾 Backup'},{k:'adm',l:'⚙️ Administração'}
+    {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
+    {k:'saldos',l:'💰 Ver saldos das contas'}
   ];
   openModal(`<h3>${id?'Editar':'Novo'} Perfil</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px">
@@ -1196,15 +1199,24 @@ window.editPerfil = function(id){
     document.querySelectorAll('[data-perm-k]').forEach(cb=>{ perms[cb.dataset.permK]=cb.checked; });
     const cor=$('#pf-cor').value;
     const desc=$('#pf-desc').value.trim();
-    if(id){ pf.nome=nome; pf.cor=cor; pf.desc=desc; pf.perms=perms; }
+    if(id){
+      if(pf.perms && pf.perms.all) perms.all = true;   // não rebaixa o perfil de acesso total
+      pf.nome=nome; pf.cor=cor; pf.desc=desc; pf.perms=perms;
+    }
     else { const newId=(ROOT.perfis.reduce((m,x)=>Math.max(m,x.id),0))+1; ROOT.perfis.push({id:newId,nome,cor,desc,perms}); }
-    save(); closeModal(); render(); toast('Perfil salvo.');
+    save(); closeModal(); refreshSide(); render(); toast('Perfil salvo.');
   };
 };
 function render(){
   const M = $('#main');
   if(ROOT) aplicarTema(empAtual());   // garante que o tema volte ao da empresa após qualquer prévia
   updateEmpBar();
+  // usuário sem permissão na aba atual cai na primeira aba permitida
+  if(USER && !hasPerm(VIEW)){
+    VIEW = ['dash','lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','contab','bkp','adm']
+             .find(m=>hasPerm(m)) || 'dash';
+    document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on', x.dataset.v===VIEW));
+  }
   if(VIEW==='dash') M.innerHTML = vDash();
   else if(VIEW==='lanc'){ M.innerHTML = vLanc(); bindLanc(); }
   else if(VIEW==='conc'){ M.innerHTML = vConc(); bindConc(); }
@@ -1217,6 +1229,7 @@ function render(){
   else if(VIEW==='cpr'){ M.innerHTML = vCpr(); bindCpr(); }
   else if(VIEW==='emailcfg'){ M.innerHTML = vEmailCfg(); bindEmailCfg(); }
   else if(VIEW==='docs'){ M.innerHTML = vDocs(); bindDocs(); }
+  else if(VIEW==='contab'){ M.innerHTML = vContab(); bindContab(); }
   else if(VIEW==='bkp'){ M.innerHTML = vBkp(); bindBkp(); }
 }
 
@@ -1224,7 +1237,11 @@ function render(){
 window.goPendentes = ()=>{ LF={de:'',ate:'',ct:'',tipo:'',pl:'',cc:'',q:'',rec:'n',lim:200}; VIEW='lanc';
   document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on', x.dataset.v==='lanc')); render(); };
 function saldoConta(id){ return round2((conta(id).saldoIni||0) + DB.lancs.filter(l=>l.ct===id).reduce((s,l)=>s+l.v,0)); }
+/* Permissão 'saldos': quando ausente, saldos de conta ficam ocultos para o usuário */
+function verSaldos(){ return hasPerm('saldos'); }
 function vDash(){
+  if(USER && !hasPerm('dash')) return `<h2>Sem acesso</h2><div class="panel">
+    <p>Seu perfil não tem nenhum módulo liberado. Peça a um administrador para revisar suas permissões em <b>Administração → Perfis</b>.</p></div>`;
   const ym = today().slice(0,7);
   let recM=0, despM=0;
   DB.lancs.forEach(l=>{ if((l.data||'').slice(0,7)===ym){ if(l.v>0) recM+=l.v; else despM+=l.v; } });
@@ -1247,8 +1264,8 @@ function vDash(){
   const ult = [...DB.lancs].sort((a,b)=>(b.data||'').localeCompare(a.data||'')||b.id-a.id).slice(0,8);
   return `<h2>Painel</h2>
   <div class="cards">
-    <div class="card"><div class="lb">Saldo total</div><div class="vl ${total<0?'neg':'pos'}">${fmt(total)}</div></div>
-    ${saldos.map(x=>`<div class="card"><div class="lb">${esc(x.c.nome)}</div><div class="vl ${x.s<0?'neg':''}">${fmt(x.s)}</div></div>`).join('')}
+    ${verSaldos()?`<div class="card"><div class="lb">Saldo total</div><div class="vl ${total<0?'neg':'pos'}">${fmt(total)}</div></div>
+    ${saldos.map(x=>`<div class="card"><div class="lb">${esc(x.c.nome)}</div><div class="vl ${x.s<0?'neg':''}">${fmt(x.s)}</div></div>`).join('')}`:''}
     <div class="card"><div class="lb">Entradas no mês</div><div class="vl pos">${fmt(recM)}</div></div>
     <div class="card"><div class="lb">Saídas no mês</div><div class="vl neg">${fmt(despM)}</div></div>
     <div class="card" style="cursor:pointer" onclick="goPendentes()"><div class="lb">⏳ Não conciliados</div><div class="vl ${nPend?'':'pos'}">${nPend}</div><div class="sm-t mut" style="margin-top:2px">${nPend?'clique para ver':'tudo conciliado ✓'}</div></div>
@@ -1404,7 +1421,8 @@ function gPainel(g, emps){
   ult.sort((a,b)=>(b.l.data||'').localeCompare(a.l.data||''));
   return `
   <div class="cards">
-    <div class="card"><div class="lb">Saldo total do grupo</div><div class="vl ${saldo<0?'neg':'pos'}">${fmt(saldo)}</div><div class="sm-t mut" style="margin-top:2px">${emps.length} empresas</div></div>
+    ${verSaldos()?`<div class="card"><div class="lb">Saldo total do grupo</div><div class="vl ${saldo<0?'neg':'pos'}">${fmt(saldo)}</div><div class="sm-t mut" style="margin-top:2px">${emps.length} empresas</div></div>`
+                 :`<div class="card"><div class="lb">Empresas no grupo</div><div class="vl">${emps.length}</div></div>`}
     <div class="card"><div class="lb">Entradas no período</div><div class="vl pos">${fmt(rec)}</div></div>
     <div class="card"><div class="lb">Saídas no período</div><div class="vl neg">${fmt(desp)}</div></div>
     <div class="card"><div class="lb">Resultado do período</div><div class="vl ${res<0?'neg':'pos'}">${fmt(res)}</div></div>
@@ -1412,11 +1430,11 @@ function gPainel(g, emps){
   </div>
   <div class="panel"><h3 style="margin-top:0">Entradas × Saídas do grupo — últimos 12 meses</h3><div class="chart">${chart}</div></div>
   <div style="display:flex;gap:18px;flex-wrap:wrap">
-    <div class="panel" style="flex:1.3;min-width:340px"><h3 style="margin-top:0">Saldo por empresa</h3>
+    ${verSaldos()?`<div class="panel" style="flex:1.3;min-width:340px"><h3 style="margin-top:0">Saldo por empresa</h3>
       <table><tr><th>Empresa</th><th style="width:38%"></th><th class="r">Saldo</th></tr>
       ${st.map(x=>`<tr><td>${esc(x.emp.nome)}</td><td><div class="bar ${x.saldo<0?'b2':''}" style="width:${Math.round(Math.abs(x.saldo)/mxs*100)}%"></div></td><td class="r ${x.saldo<0?'neg':'pos'}">${fmt(x.saldo)}</td></tr>`).join('')}
       <tr><td><b>Total</b></td><td></td><td class="r"><b class="${saldo<0?'neg':'pos'}">${fmt(saldo)}</b></td></tr></table>
-    </div>
+    </div>`:''}
     <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Resultado no período</h3>
       <table><tr><th>Empresa</th><th class="r">Resultado</th></tr>
       ${ord.map(x=>`<tr><td>${esc(x.emp.nome)}</td><td class="r ${x.res<0?'neg':'pos'}">${fmt(x.res)}</td></tr>`).join('')}</table>
@@ -1435,9 +1453,10 @@ function gComparativo(g, emps){
   const td = round2(st.reduce((s,x)=>s+x.desp,0));
   const tres = round2(tr+td);
   const mxr = Math.max(1,...st.map(x=>Math.max(x.rec,Math.abs(x.desp))));
-  GRUPO_CSV = [['Empresa','Entradas','Saídas','Resultado','Margem %','Lançamentos','Saldo atual']];
-  st.forEach(x=>GRUPO_CSV.push([x.emp.nome,nBR(x.rec),nBR(x.desp),nBR(x.res),x.rec?nBR(x.res/x.rec*100):'0,00',x.n,nBR(x.saldo)]));
-  GRUPO_CSV.push(['TOTAL',nBR(tr),nBR(td),nBR(tres),tr?nBR(tres/tr*100):'0,00',st.reduce((s,x)=>s+x.n,0),nBR(round2(st.reduce((s,x)=>s+x.saldo,0)))]);
+  const vs = verSaldos();
+  GRUPO_CSV = [['Empresa','Entradas','Saídas','Resultado','Margem %','Lançamentos'].concat(vs?['Saldo atual']:[])];
+  st.forEach(x=>GRUPO_CSV.push([x.emp.nome,nBR(x.rec),nBR(x.desp),nBR(x.res),x.rec?nBR(x.res/x.rec*100):'0,00',x.n].concat(vs?[nBR(x.saldo)]:[])));
+  GRUPO_CSV.push(['TOTAL',nBR(tr),nBR(td),nBR(tres),tr?nBR(tres/tr*100):'0,00',st.reduce((s,x)=>s+x.n,0)].concat(vs?[nBR(round2(st.reduce((s,x)=>s+x.saldo,0)))]:[]));
   // matriz mês × empresa (resultado)
   const mset = new Set();
   emps.forEach(e=>empLancsPer(e).forEach(l=>mset.add(l.data.slice(0,7))));
@@ -1447,7 +1466,7 @@ function gComparativo(g, emps){
   return `
   <div class="panel"><h3 style="margin-top:0">Comparativo no período</h3>
     <table>
-      <tr><th>Empresa</th><th class="r">Entradas</th><th class="r">Saídas</th><th style="width:22%">Proporção</th><th class="r">Resultado</th><th class="r">Margem</th><th class="r">Lanç.</th><th class="r">Saldo atual</th></tr>
+      <tr><th>Empresa</th><th class="r">Entradas</th><th class="r">Saídas</th><th style="width:22%">Proporção</th><th class="r">Resultado</th><th class="r">Margem</th><th class="r">Lanç.</th>${vs?'<th class="r">Saldo atual</th>':''}</tr>
       ${st.map(x=>`<tr>
         <td>${esc(x.emp.nome)}</td>
         <td class="r pos">${fmt(x.rec)}</td>
@@ -1458,12 +1477,12 @@ function gComparativo(g, emps){
         <td class="r ${x.res<0?'neg':'pos'}">${fmt(x.res)}</td>
         <td class="r ${x.res<0?'neg':'pos'}">${x.rec?(x.res/x.rec*100).toFixed(1)+'%':'—'}</td>
         <td class="r sm-t">${x.n}</td>
-        <td class="r ${x.saldo<0?'neg':'pos'}">${fmt(x.saldo)}</td></tr>`).join('')}
+        ${vs?`<td class="r ${x.saldo<0?'neg':'pos'}">${fmt(x.saldo)}</td>`:''}</tr>`).join('')}
       <tr><td><b>TOTAL</b></td><td class="r pos"><b>${fmt(tr)}</b></td><td class="r neg"><b>${fmt(td)}</b></td><td></td>
         <td class="r"><b class="${tres<0?'neg':'pos'}">${fmt(tres)}</b></td>
         <td class="r"><b>${tr?(tres/tr*100).toFixed(1)+'%':'—'}</b></td>
         <td class="r sm-t"><b>${st.reduce((s,x)=>s+x.n,0)}</b></td>
-        <td class="r"><b>${fmt(round2(st.reduce((s,x)=>s+x.saldo,0)))}</b></td></tr>
+        ${vs?`<td class="r"><b>${fmt(round2(st.reduce((s,x)=>s+x.saldo,0)))}</b></td>`:''}</tr>
     </table>
     <div style="margin-top:10px"><button class="sec" id="g-csv">Exportar CSV</button> <button class="sec" id="g-print">🖨️ Imprimir</button></div>
   </div>
@@ -1927,7 +1946,7 @@ function vConc(){
       <button class="ok" id="o-all">✓ Confirmar todas com sugestão</button>
       <button class="sec" id="o-cancel">Fechar arquivo</button>
     </div>
-    ${OFX.balance!=null?`<p class="sm-t mut" style="margin-bottom:8px">Saldo informado no OFX: <b>${fmt(OFX.balance)}</b> — saldo da conta no sistema: <b>${fmt(saldoConta(OFX.conta))}</b></p>`:''}
+    ${(OFX.balance!=null && verSaldos())?`<p class="sm-t mut" style="margin-bottom:8px">Saldo informado no OFX: <b>${fmt(OFX.balance)}</b> — saldo da conta no sistema: <b>${fmt(saldoConta(OFX.conta))}</b></p>`:''}
     <div class="panel"><table>
       <tr><th>Data</th><th class="r">Valor</th><th>Descrição (OFX)</th><th>Situação</th><th>Favorecido</th><th>Plano de conta</th><th>Centro de custo</th><th>Observação</th><th></th></tr>
       ${OFX.txns.map((t,i)=>{
@@ -2076,7 +2095,7 @@ function vRel(){
       <option value="fluxo" ${RF.tipo==='fluxo'?'selected':''}>Fluxo de caixa mensal</option>
       <option value="cc" ${RF.tipo==='cc'?'selected':''}>Despesas por centro de custo</option>
       <option value="dre" ${RF.tipo==='dre'?'selected':''}>DRE simplificado</option>
-      <option value="extrato" ${RF.tipo==='extrato'?'selected':''}>Extrato com saldo</option>
+      ${verSaldos()?`<option value="extrato" ${RF.tipo==='extrato'?'selected':''}>Extrato com saldo</option>`:''}
       <option value="plano" ${RF.tipo==='plano'?'selected':''}>Despesas por plano de contas</option>
       <option value="forn" ${RF.tipo==='forn'?'selected':''}>Por fornecedor / favorecido</option>
       <option value="contabil" ${RF.tipo==='contabil'?'selected':''}>📋 Relatório Contábil (com anexos)</option>
@@ -2153,6 +2172,7 @@ function relBody(){
     <tr style="font-weight:700;font-size:15px"><td>RESULTADO</td><td class="r ${tr+td<0?'neg':'pos'}">${fmt(round2(tr+td))}</td></tr></table>`;
   }
   if(RF.tipo==='extrato'){
+    if(!verSaldos()) return head+'<p class="mut">Você não tem permissão para ver saldos de conta. Escolha outro relatório.</p>';
     const ctId = +RF.ct || DB.contas[0].id;
     const all = DB.lancs.filter(l=>l.ct===ctId).sort((a,b)=>(a.data||'').localeCompare(b.data||'')||a.id-b.id);
     let saldo = conta(ctId).saldoIni||0;
@@ -2424,6 +2444,254 @@ function bindRel(){
   };
 }
 
+/* ============ CONTABILIDADE (pacote mensal de documentos) ============ */
+let CTB = { mes:'', de:'', ate:'', soNovos:true, init:false };
+
+function mesesComDados(){
+  const s = new Set();
+  DB.lancs.forEach(l=>{ if(l.data) s.add(l.data.slice(0,7)); });
+  return [...s].sort().reverse();
+}
+function ctbPeriodo(){
+  if(CTB.mes){
+    const [y,m] = CTB.mes.split('-').map(Number);
+    const ult = new Date(y, m, 0).getDate();
+    return { de:`${CTB.mes}-01`, ate:`${CTB.mes}-${String(ult).padStart(2,'0')}` };
+  }
+  return { de:CTB.de, ate:CTB.ate };
+}
+function ctbLancs(){
+  const p = ctbPeriodo();
+  return DB.lancs.filter(l=>l.data
+      && (!p.de  || l.data >= p.de)
+      && (!p.ate || l.data <= p.ate)
+      && (!CTB.soNovos || !l.envContab))
+    .sort((a,b)=>(a.data||'').localeCompare(b.data||'')||a.id-b.id);
+}
+function nDocs(l){ return (l.docs||[]).length; }
+function docDoFav(nome){
+  const f = (DB.favorecidos||[]).find(x=>norm(x.nome)===norm(nome));
+  return f ? (f.doc||'') : '';
+}
+function safeNomeArq(s){
+  return norm(s).replace(/[^A-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,38) || 'SEM-NOME';
+}
+
+function vContab(){
+  if(!hasPerm('contab')) return '<h2>📤 Contabilidade</h2><div class="panel"><p>Você não tem permissão para acessar este módulo.</p></div>';
+  const meses = mesesComDados();
+  if(!CTB.init){ if(meses.length) CTB.mes = meses[0]; CTB.init = true; }
+  const p = ctbPeriodo();
+  const L = ctbLancs();
+  const comDoc  = L.filter(l=>nDocs(l)>0);
+  const semDoc  = L.filter(l=>nDocs(l)===0);
+  const totDocs = L.reduce((s,l)=>s+nDocs(l),0);
+  const jaEnv   = DB.lancs.filter(l=>l.data && (!p.de||l.data>=p.de) && (!p.ate||l.data<=p.ate) && l.envContab).length;
+  const envios  = (DB.enviosContab||[]).slice().reverse();
+  return `<h2>📤 Contabilidade</h2>
+  <div class="panel" style="border-left:4px solid var(--acc)">
+    <p class="sm-t mut" style="margin-top:0">Gere um pacote <b>.zip</b> com os documentos fiscais organizados por mês e por tipo, acompanhados de um índice que liga cada arquivo ao seu lançamento. Basta descompactar e anexar no sistema do escritório.</p>
+    <div class="flt" style="margin-bottom:0">
+      <label>Mês de referência<select id="ct-mes">
+        <option value="">— período personalizado —</option>
+        ${meses.map(m=>`<option value="${m}" ${CTB.mes===m?'selected':''}>${monthName(m)}</option>`).join('')}
+      </select></label>
+      <label>De<input type="date" id="ct-de" value="${CTB.de}" ${CTB.mes?'disabled':''}></label>
+      <label>Até<input type="date" id="ct-ate" value="${CTB.ate}" ${CTB.mes?'disabled':''}></label>
+      <label style="flex-direction:row;align-items:center;gap:7px;font-size:13px;color:var(--tx);align-self:flex-end;padding-bottom:5px">
+        <input type="checkbox" id="ct-novos" ${CTB.soNovos?'checked':''} style="width:auto"> Somente o que ainda não foi enviado
+      </label>
+    </div>
+  </div>
+  <div class="cards">
+    <div class="card"><div class="lb">Lançamentos a enviar</div><div class="vl">${L.length}</div><div class="sm-t mut" style="margin-top:2px">${p.de?fmtD(p.de):'início'} a ${p.ate?fmtD(p.ate):'hoje'}</div></div>
+    <div class="card"><div class="lb">Documentos anexados</div><div class="vl pos">${totDocs}</div><div class="sm-t mut" style="margin-top:2px">em ${comDoc.length} lançamento(s)</div></div>
+    <div class="card"><div class="lb">Sem documento</div><div class="vl ${semDoc.length?'neg':'pos'}">${semDoc.length}</div><div class="sm-t mut" style="margin-top:2px">${semDoc.length?'entram no pacote como pendência':'nada faltando ✓'}</div></div>
+    <div class="card"><div class="lb">Já enviados no período</div><div class="vl mut">${jaEnv}</div></div>
+  </div>
+  <div class="toolbar">
+    <button id="ct-gerar" ${L.length?'':'disabled'}>📦 Gerar pacote para a contabilidade</button>
+    <button class="sec" id="ct-csv">Baixar só o índice (CSV)</button>
+    ${podeGerirGrupos()&&jaEnv?`<button class="sec" id="ct-desmarcar">↩️ Desmarcar envios do período</button>`:''}
+  </div>
+  ${semDoc.length?`<div class="panel" style="border-left:4px solid var(--bad)">
+    <h3 style="margin-top:0">⚠️ ${semDoc.length} lançamento(s) sem documento anexado</h3>
+    <p class="sm-t mut">Estes entram no pacote em uma lista à parte (<b>PENDENTES-SEM-DOCUMENTO.csv</b>) para o escritório saber o que cobrar.</p>
+    <table><tr><th>Data</th><th>Favorecido</th><th>Histórico</th><th class="r">Valor</th></tr>
+    ${semDoc.slice(0,10).map(l=>`<tr><td>${fmtD(l.data)}</td><td>${esc(l.fav)}</td><td class="hist" title="${esc(l.hist)}">${esc(l.hist)}</td><td class="r ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td></tr>`).join('')}
+    </table>${semDoc.length>10?`<p class="sm-t mut" style="margin-top:8px">…e mais ${semDoc.length-10}.</p>`:''}
+  </div>`:''}
+  <div class="panel">
+    <h3 style="margin-top:0">Prévia do pacote</h3>
+    ${L.length?`<table>
+      <tr><th>Data</th><th>Pasta no ZIP</th><th>Favorecido</th><th>Plano de Conta</th><th class="r">Valor</th><th class="r">Docs</th><th>Status</th></tr>
+      ${L.slice(0,60).map(l=>`<tr>
+        <td>${fmtD(l.data)}</td>
+        <td class="sm-t mut">${l.data.slice(0,7)}/${l.v<0?'DESPESAS':'RECEITAS'}</td>
+        <td>${esc(l.fav)}</td>
+        <td class="sm-t mut">${esc(planoN(l.pl))}</td>
+        <td class="r ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td>
+        <td class="r">${nDocs(l)?`<span class="badge b-ok">📎 ${nDocs(l)}</span>`:'<span class="badge b-bad">—</span>'}</td>
+        <td class="sm-t">${l.envContab?`<span class="badge b-mut">enviado ${fmtD(l.envContab)}</span>`:'<span class="badge b-acc">novo</span>'}</td>
+      </tr>`).join('')}
+    </table>${L.length>60?`<p class="sm-t mut" style="margin-top:8px">Mostrando 60 de ${L.length}. O pacote incluirá todos.</p>`:''}`
+    :'<span class="mut">Nenhum lançamento no período selecionado'+(CTB.soNovos?' que ainda não tenha sido enviado.':'.')+'</span>'}
+  </div>
+  ${envios.length?`<div class="panel">
+    <h3 style="margin-top:0">Histórico de envios</h3>
+    <table><tr><th>Gerado em</th><th>Período</th><th class="r">Lançamentos</th><th class="r">Documentos</th><th>Por</th></tr>
+    ${envios.slice(0,12).map(x=>`<tr><td>${fmtD(x.quando)}</td><td class="sm-t">${x.de?fmtD(x.de):'início'} a ${x.ate?fmtD(x.ate):'hoje'}</td><td class="r">${x.nLancs}</td><td class="r">${x.nDocs}</td><td class="sm-t mut">${esc(x.por||'—')}</td></tr>`).join('')}
+    </table></div>`:''}`;
+}
+
+function gerarPacoteContab(){
+  const L = ctbLancs();
+  if(!L.length) return alert('Não há lançamentos no período selecionado.');
+  const p = ctbPeriodo();
+  const emp = empAtual();
+  const empNome = safeNomeArq(emp.nome);
+  const entries = [];
+  const usados = new Set();
+  const indice = [['Arquivo','Pasta','Data','Tipo','Favorecido','CPF/CNPJ','Plano de Conta','Centro de Custo','Histórico','Conta','Valor','Observação']];
+  let docCount = 0;
+  const falhas = [];                 // anexos corrompidos que não entraram no ZIP
+  const okIds  = new Set();          // lançamentos cujos documentos entraram de fato
+
+  for(const l of L){
+    const mes  = l.data.slice(0,7);
+    const tipo = l.v < 0 ? 'DESPESAS' : 'RECEITAS';
+    const pasta = `${mes}/${tipo}`;
+    const valTxt = Math.abs(l.v).toFixed(2).replace('.','-');
+    const base = `${l.data}_${safeNomeArq(l.fav||l.hist)}_${valTxt}`;
+    (l.docs||[]).forEach(d=>{
+      const ext = ((d.name||'').split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
+      let nome = `${base}.${ext}`, n = 2;
+      while(usados.has(pasta+'/'+nome)) nome = `${base}_${n++}.${ext}`;
+      usados.add(pasta+'/'+nome);
+      try{
+        const b64 = (d.data||'').split(',')[1] || d.data || '';
+        const bin = atob(b64);
+        const u8 = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+        entries.push({ name:`${pasta}/${nome}`, data:u8 });
+        indice.push([nome, pasta, fmtD(l.data), l.v<0?'Despesa':'Receita', l.fav||'', docDoFav(l.fav),
+                     planoN(l.pl), ccN(l.cc), l.hist||'', contaN(l.ct)||'', nBR(l.v), l.obs||'']);
+        docCount++; okIds.add(l.id);
+      }catch(err){
+        console.warn('Anexo ignorado:', nome, err);
+        falhas.push(`${fmtD(l.data)} — ${l.fav||l.hist} — ${d.name||nome}`);
+      }
+    });
+  }
+
+  entries.push({ name:'INDICE.csv', data: csvOut(indice) });
+
+  if(falhas.length){
+    entries.push({ name:'ANEXOS-COM-ERRO.txt', data:
+      'Os anexos abaixo estão corrompidos e não puderam ser incluídos no pacote.\n'+
+      'Reenvie-os pelo sistema e gere o pacote novamente.\n\n'+falhas.join('\n')+'\n' });
+  }
+
+  const semDoc = L.filter(l=>nDocs(l)===0);
+  if(semDoc.length){
+    const rows = [['Data','Tipo','Favorecido','CPF/CNPJ','Plano de Conta','Centro de Custo','Histórico','Conta','Valor','Observação']];
+    semDoc.forEach(l=>rows.push([fmtD(l.data), l.v<0?'Despesa':'Receita', l.fav||'', docDoFav(l.fav),
+      planoN(l.pl), ccN(l.cc), l.hist||'', contaN(l.ct)||'', nBR(l.v), l.obs||'']));
+    entries.push({ name:'PENDENTES-SEM-DOCUMENTO.csv', data: csvOut(rows) });
+  }
+
+  const totR = round2(L.filter(l=>l.v>0).reduce((s,l)=>s+l.v,0));
+  const totD = round2(L.filter(l=>l.v<0).reduce((s,l)=>s+l.v,0));
+  const pastas = [...new Set(entries.filter(e=>e.name.includes('/')).map(e=>e.name.split('/').slice(0,2).join('/')))].sort();
+  entries.push({ name:'LEIA-ME.txt', data:
+`PACOTE PARA A CONTABILIDADE
+${emp.nome}${emp.cnpj?'  —  CNPJ '+emp.cnpj:''}
+Período: ${p.de?fmtD(p.de):'início'} a ${p.ate?fmtD(p.ate):'hoje'}
+Gerado em: ${new Date().toLocaleString('pt-BR')}${USER?'  por '+USER.nome:''}
+
+RESUMO
+  Lançamentos no pacote ....... ${L.length}
+  Documentos anexados ......... ${docCount}
+  Lançamentos sem documento ... ${semDoc.length}
+  Total de receitas ........... ${nBR(totR)}
+  Total de despesas ........... ${nBR(totD)}
+  Resultado do período ........ ${nBR(round2(totR+totD))}
+
+COMO ESTÁ ORGANIZADO
+  INDICE.csv
+      Uma linha por documento. Liga o nome do arquivo ao lançamento
+      correspondente: data, favorecido, CPF/CNPJ, plano de conta,
+      centro de custo, histórico, conta e valor.
+      Abra no Excel para conferir ou filtrar.
+${semDoc.length?`
+  PENDENTES-SEM-DOCUMENTO.csv
+      Lançamentos do período que ainda não têm nota ou recibo anexado.
+`:''}
+  Pastas por mês e tipo:
+${pastas.map(x=>'      '+x+'/').join('\n')}
+
+  Cada arquivo é nomeado no padrão:
+      AAAA-MM-DD_FAVORECIDO_VALOR.extensão
+      Exemplo: 2026-06-15_CONSTRUTORA-XPTO_1250-00.pdf
+
+  O valor no nome usa hífen no lugar da vírgula (1250-00 = R$ 1.250,00).
+
+DÚVIDAS
+  Procure o responsável financeiro da ${emp.nome}.
+` });
+
+  const per = CTB.mes ? CTB.mes : `${(p.de||'inicio').replace(/-/g,'')}_${(p.ate||'fim').replace(/-/g,'')}`;
+  const fname = `Contabilidade_${empNome}_${per}.zip`;
+  const url = URL.createObjectURL(buildZip(entries));
+  const a = document.createElement('a'); a.href=url; a.download=fname; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
+
+  const marcaveis = L.filter(l=>okIds.has(l.id));   // só os que tiveram documento incluído
+  const pendentes = L.length - marcaveis.length;
+  if(!marcaveis.length){
+    return toast(`Pacote gerado, mas nenhum documento foi incluído — nada foi marcado como enviado.`);
+  }
+  if(confirm(`Pacote "${fname}" gerado com ${docCount} documento(s).\n\n`+
+             `Marcar como ENVIADOS os ${marcaveis.length} lançamentos cujos documentos entraram no pacote?\n\n`+
+             (pendentes?`Os ${pendentes} lançamento(s) sem documento continuam pendentes e voltarão a aparecer na próxima exportação, para você não perder a nota quando ela chegar.\n\n`:'')+
+             `Os marcados deixam de aparecer quando o filtro "somente o que ainda não foi enviado" estiver ligado.`)){
+    const hoje = today();
+    marcaveis.forEach(l=>{ l.envContab = hoje; });
+    if(!DB.enviosContab) DB.enviosContab = [];
+    DB.enviosContab.push({ quando:hoje, de:p.de, ate:p.ate, nLancs:marcaveis.length, nDocs:docCount, por:(USER&&USER.nome)||'' });
+    save(); render();
+    toast(`${marcaveis.length} lançamento(s) marcados como enviados.`);
+  } else {
+    toast(`Pacote gerado: ${docCount} documento(s). Nada foi marcado.`);
+  }
+}
+
+function bindContab(){
+  if(!hasPerm('contab')) return;
+  const ms = $('#ct-mes');
+  if(ms) ms.onchange = e=>{ CTB.mes = e.target.value; if(CTB.mes){ CTB.de=''; CTB.ate=''; } render(); };
+  ['ct-de','ct-ate'].forEach((id,i)=>{ const el=$('#'+id); if(el) el.onchange = e=>{ CTB[i?'ate':'de']=e.target.value; CTB.mes=''; render(); }; });
+  const nv = $('#ct-novos'); if(nv) nv.onchange = e=>{ CTB.soNovos = e.target.checked; render(); };
+  const gr = $('#ct-gerar'); if(gr) gr.onclick = ()=>gerarPacoteContab();
+  const cs = $('#ct-csv');
+  if(cs) cs.onclick = ()=>{
+    const rows = [['Data','Tipo','Favorecido','CPF/CNPJ','Plano de Conta','Centro de Custo','Histórico','Conta','Valor','Qtd Anexos','Observação']];
+    ctbLancs().forEach(l=>rows.push([fmtD(l.data), l.v<0?'Despesa':'Receita', l.fav||'', docDoFav(l.fav),
+      planoN(l.pl), ccN(l.cc), l.hist||'', contaN(l.ct)||'', nBR(l.v), nDocs(l), l.obs||'']));
+    dl('indice_contabilidade.csv', csvOut(rows), 'text/csv');
+  };
+  const dm = $('#ct-desmarcar');
+  if(dm) dm.onclick = ()=>{
+    const p = ctbPeriodo();
+    if(!p.de && !p.ate) return alert('Selecione um mês ou um período antes de desmarcar.');
+    const alvo = DB.lancs.filter(l=>l.data && (!p.de||l.data>=p.de) && (!p.ate||l.data<=p.ate) && l.envContab);
+    if(!alvo.length) return;
+    if(!confirm(`Desmarcar ${alvo.length} lançamento(s) como não enviados?\n\nEles voltarão a aparecer na próxima exportação.`)) return;
+    alvo.forEach(l=>{ delete l.envContab; });
+    save(); render(); toast(`${alvo.length} lançamento(s) desmarcados.`);
+  };
+}
+
 /* ============ CADASTROS ============ */
 function usoPlano(id){ return DB.lancs.filter(l=>lparts(l).some(p=>p.pl===id)).length; }
 function usoCC(id){ return DB.lancs.filter(l=>lparts(l).some(p=>p.cc===id)).length; }
@@ -2432,8 +2700,8 @@ function vCad(){
   return `<h2>Cadastros</h2>
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
     <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Contas bancárias <button class="sm" onclick="cadConta(null)">+ Nova</button></h3>
-      <table><tr><th>Nome</th><th class="r">Saldo inicial</th><th class="r">Saldo atual</th><th></th></tr>
-      ${DB.contas.map(c=>`<tr><td>${esc(c.nome)}${c.banco?' <span class="mut sm-t">('+esc(c.banco)+')</span>':''}</td><td class="r">${fmt(c.saldoIni||0)}</td><td class="r">${fmt(saldoConta(c.id))}</td>
+      <table><tr><th>Nome</th>${verSaldos()?'<th class="r">Saldo inicial</th><th class="r">Saldo atual</th>':''}<th></th></tr>
+      ${DB.contas.map(c=>`<tr><td>${esc(c.nome)}${c.banco?' <span class="mut sm-t">('+esc(c.banco)+')</span>':''}</td>${verSaldos()?`<td class="r">${fmt(c.saldoIni||0)}</td><td class="r">${fmt(saldoConta(c.id))}</td>`:''}
       <td style="white-space:nowrap"><button class="sm sec" onclick="cadConta(${c.id})">✏️</button> <button class="sm sec" onclick="delConta(${c.id})">🗑️</button></td></tr>`).join('')}</table></div>
     <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Plano de contas <button class="sm" onclick="cadPlano(null)">+ Novo</button></h3>
       <table><tr><th>Nome</th><th>Tipo</th><th class="r">Usos</th><th></th></tr>
@@ -2795,7 +3063,8 @@ function vAdm(){
     {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
     {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
-    {k:'bkp',l:'💾 Backup'},{k:'adm',l:'⚙️ Administração'}
+    {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
+    {k:'saldos',l:'💰 Ver saldos das contas'}
   ];
   let body='';
   if(tab==='usuarios'){
@@ -2978,11 +3247,12 @@ function nextCadId(list){ return list.reduce((m,x)=>Math.max(m,x.id),0)+1; }
 window.cadConta = id => { const c = id?conta(id):{nome:'',banco:'',saldoIni:0};
   openModal(`<h3>${id?'Editar':'Nova'} conta</h3><div class="fgrid">
     <label>Nome<input id="c-n" value="${esc(c.nome)}"></label><label>Banco/descrição<input id="c-b" value="${esc(c.banco||'')}"></label>
-    <label>Saldo inicial (R$)<input type="number" step="0.01" id="c-s" value="${c.saldoIni||0}"></label></div>
+    ${verSaldos()?`<label>Saldo inicial (R$)<input type="number" step="0.01" id="c-s" value="${c.saldoIni||0}"></label>`:''}</div>
     <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="c-ok">Salvar</button></div>`);
   $('#c-ok').onclick=()=>{ const n=$('#c-n').value.trim(); if(!n) return alert('Informe o nome.');
-    if(id) Object.assign(c,{nome:n,banco:$('#c-b').value.trim(),saldoIni:parseFloat($('#c-s').value)||0});
-    else DB.contas.push({id:nextCadId(DB.contas),nome:n,banco:$('#c-b').value.trim(),saldoIni:parseFloat($('#c-s').value)||0});
+    const si = verSaldos() ? (parseFloat($('#c-s').value)||0) : (c.saldoIni||0);  // sem permissão, preserva o valor atual
+    if(id) Object.assign(c,{nome:n,banco:$('#c-b').value.trim(),saldoIni:si});
+    else DB.contas.push({id:nextCadId(DB.contas),nome:n,banco:$('#c-b').value.trim(),saldoIni:si});
     save(); closeModal(); render(); }; };
 window.delConta = id => { if(usoConta(id)) return alert('Conta possui '+usoConta(id)+' lançamentos. Transfira-os antes de excluir.');
   if(confirm('Excluir conta?')){ DB.contas=DB.contas.filter(c=>c.id!==id); save(); render(); } };
@@ -3114,7 +3384,9 @@ function aiContext(){
   const periodo = todos.length ? todos[todos.length-1].data+' a '+todos[0].data : 'sem lançamentos';
   return 'Empresa: '+(ROOT.empresas.find(e=>e.id===ROOT.empAtual)||{}).nome
     +'\nTotal de lançamentos: '+DB.lancs.length+'. Período coberto: '+periodo
-    +'\n\nSaldos por conta:\n'+DB.contas.map(c=>c.nome+': '+saldoConta(c.id)).join('\n')
+    + (verSaldos()
+        ? '\n\nSaldos por conta:\n'+DB.contas.map(c=>c.nome+': '+saldoConta(c.id)).join('\n')
+        : '\n\nOBS: este usuário não tem permissão para ver saldos de conta. Nunca informe nem estime saldos; se perguntarem, responda que essa informação é restrita.')
     +'\n\nTotais mensais por plano de conta (mês | plano: valor):\n'+dump(byMP)
     +'\n\nTotais mensais por centro de custo (mês | centro: valor):\n'+dump(byMC)
     +'\n\nTotal por favorecido (top 60):\n'+topF
@@ -3368,17 +3640,27 @@ $('#modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeMo
 function ensurePerfis(r){
   if(!r.perfis||!r.perfis.length) r.perfis=[
     {id:1,nome:'Administrador',desc:'Acesso total ao sistema',cor:'#4a90d9',perms:{all:true}},
-    {id:2,nome:'Financeiro',desc:'Lançamentos, conciliação e relatórios',cor:'#27ae60',perms:{dash:true,lanc:true,conc:true,rel:true,grupo:true,ai:true,cad:true,favs:true,docs:true,cpr:true,emailcfg:true,bkp:true,adm:false}},
-    {id:3,nome:'Contador',desc:'Somente relatórios e documentos',cor:'#8e44ad',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:true,ai:false,cad:false,favs:false,docs:true,cpr:false,emailcfg:false,bkp:false,adm:false}},
-    {id:4,nome:'Visualização',desc:'Somente leitura do painel',cor:'#95a5a6',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,adm:false}}
+    {id:2,nome:'Financeiro',desc:'Lançamentos, conciliação e relatórios',cor:'#27ae60',perms:{dash:true,lanc:true,conc:true,rel:true,grupo:true,ai:true,cad:true,favs:true,docs:true,cpr:true,emailcfg:true,bkp:true,contab:true,adm:false,saldos:true}},
+    {id:3,nome:'Contador',desc:'Somente relatórios e documentos',cor:'#8e44ad',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:true,ai:false,cad:false,favs:false,docs:true,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:true}},
+    {id:4,nome:'Visualização',desc:'Somente leitura do painel',cor:'#95a5a6',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false}},
+    {id:5,nome:'Operacional',desc:'Lança e consulta, mas não vê saldos das contas',cor:'#e67e22',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:true,docs:true,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false}},
+    {id:6,nome:'Contabilidade externa',desc:'Escritório terceirizado: baixa os pacotes mensais de documentos',cor:'#16a085',perms:{dash:false,lanc:false,conc:false,rel:false,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:false}}
   ];
-  // Migração: perfis salvos antes dos módulos Grupo e Favorecidos herdam de Relatórios e Cadastros
+  // Migração: perfis salvos antes destes módulos herdam permissões equivalentes
   r.perfis.forEach(p=>{
     if(!p.perms) p.perms = {};
     if(p.perms.all) return;
-    if(p.perms.grupo === undefined) p.perms.grupo = !!p.perms.rel;
-    if(p.perms.favs  === undefined) p.perms.favs  = !!p.perms.cad;
+    if(p.perms.dash   === undefined) p.perms.dash   = true;
+    if(p.perms.grupo  === undefined) p.perms.grupo  = !!p.perms.rel;
+    if(p.perms.favs   === undefined) p.perms.favs   = !!p.perms.cad;
+    if(p.perms.saldos === undefined) p.perms.saldos = true;  // mantém o comportamento anterior
+    if(p.perms.contab === undefined) p.perms.contab = !!p.perms.rel;
   });
+  // Perfis que passam a existir também em instalações antigas
+  if(!r.perfis.some(p=>p.id===5) && !r.perfis.some(p=>norm(p.nome)==='OPERACIONAL'))
+    r.perfis.push({id:5,nome:'Operacional',desc:'Lança e consulta, mas não vê saldos das contas',cor:'#e67e22',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:true,docs:true,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false}});
+  if(!r.perfis.some(p=>p.id===6) && !r.perfis.some(p=>norm(p.nome)==='CONTABILIDADE EXTERNA'))
+    r.perfis.push({id:6,nome:'Contabilidade externa',desc:'Escritório terceirizado: baixa os pacotes mensais de documentos',cor:'#16a085',perms:{dash:false,lanc:false,conc:false,rel:false,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:false}});
   r.usuarios.forEach(u=>{ if(!u.perfilId) u.perfilId=u.admin?1:2; });
   return r;
 }
@@ -3420,7 +3702,7 @@ function refreshSide(){
   }
   updateEmpBar();
   const na = $('#navAdm'); if(na) na.style.display = (USER && hasPerm('adm')) ? 'block' : 'none';
-  ['lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','bkp'].forEach(mod=>{
+  ['dash','lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','contab','bkp'].forEach(mod=>{
     const el=document.querySelector(`#nav [data-v="${mod}"]`);
     if(el) el.style.display = hasPerm(mod)?'':'none';
   });
