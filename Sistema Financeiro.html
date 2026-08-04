@@ -16,6 +16,10 @@ body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);colo
 #side nav a{display:block;padding:11px 18px;color:#cbd5e0;text-decoration:none;font-size:13.5px;border-left:3px solid transparent;cursor:pointer}
 #side nav a:hover{background:var(--side2)}
 #side nav a.on{background:var(--side2);color:#fff;border-left-color:var(--acc)}
+#side nav a.sub{padding-left:38px;font-size:12.5px;display:none}
+#side nav a.sub.show{display:block}
+#side nav a .carat{float:right;opacity:.6;font-size:11px;transition:transform .15s}
+#side nav a .carat.open{transform:rotate(90deg);display:inline-block}
 #side .ft{padding:12px 16px;font-size:10.5px;color:#667}
 #main{flex:1;padding:22px 26px;min-width:0}
 #empbar{background:var(--acc);color:#fff;padding:7px 26px;font-size:12.5px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:inset 0 -2px 0 rgba(0,0,0,.15)}
@@ -120,7 +124,9 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
       <a data-v="conc">🏦 Conciliação OFX</a>
       <a data-v="rel">📈 Relatórios</a>
       <a data-v="grupo">🏢 Visão de Grupo</a>
-      <a data-v="ai">🤖 Assistente</a>
+      <a data-grp="ai" id="navAiGrp">🤖 Assistente <span class="carat" id="aiCarat">▸</span></a>
+      <a data-v="ai" class="sub" id="navAiChat">💬 Chat</a>
+      <a data-v="aicfg" class="sub" id="navAiCfg">⚙️ Configuração</a>
       <a data-v="cad">🗂️ Cadastros</a>
       <a data-v="favs">👥 Favorecidos</a>
       <a data-v="adm" id="navAdm" style="display:none">⚙️ Administração</a>
@@ -464,10 +470,24 @@ function parseOFX(text){
 let VIEW = 'dash';
 document.getElementById('nav').addEventListener('click', e=>{
   const a = e.target.closest('a'); if(!a) return;
+  if(a.dataset.grp){ toggleGrupoNav(a.dataset.grp); return; }   // item que só abre/fecha o submenu
   VIEW = a.dataset.v;
   document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on', x===a));
   render();
 });
+/* Uma aba pode existir sem ser um módulo de permissão próprio (ex.: aicfg) */
+function podeVer(v){
+  if(v==='aicfg') return hasPerm('ai') && ehAdmin();
+  return hasPerm(v);
+}
+/* Submenu do Assistente: abre e fecha ao clicar no item pai */
+function toggleGrupoNav(grp, forcar){
+  const subs = document.querySelectorAll('#nav a.sub[data-v^="'+grp+'"]');
+  const abrir = forcar !== undefined ? forcar : !document.querySelector('#nav a.sub.show[data-v^="'+grp+'"]');
+  subs.forEach(s=>s.classList.toggle('show', abrir && podeVer(s.dataset.v)));
+  const c = document.getElementById('aiCarat');
+  if(c) c.classList.toggle('open', abrir);
+}
 
 /* ============ MODAL DOCS HELPERS ============ */
 window.renderModalDocs = function(){
@@ -1228,7 +1248,7 @@ function render(){
   if(ROOT) aplicarTema(empAtual());   // garante que o tema volte ao da empresa após qualquer prévia
   updateEmpBar();
   // usuário sem permissão na aba atual cai na primeira aba permitida
-  if(USER && !hasPerm(VIEW)){
+  if(USER && !podeVer(VIEW)){
     VIEW = ['dash','lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','contab','bkp','adm']
              .find(m=>hasPerm(m)) || 'dash';
     document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on', x.dataset.v===VIEW));
@@ -1239,6 +1259,7 @@ function render(){
   else if(VIEW==='rel'){ M.innerHTML = vRel(); bindRel(); }
   else if(VIEW==='grupo'){ M.innerHTML = vGrupo(); bindGrupo(); }
   else if(VIEW==='ai'){ M.innerHTML = vAI(); bindAI(); }
+  else if(VIEW==='aicfg'){ M.innerHTML = vAICfg(); bindAICfg(); }
   else if(VIEW==='cad'){ M.innerHTML = vCad(); }
   else if(VIEW==='favs'){ M.innerHTML = vFavs(); bindFavs(); }
   else if(VIEW==='adm'){ M.innerHTML = vAdm(); bindAdm(); }
@@ -3247,6 +3268,10 @@ window.cadUser = id => { if(!podeEditar()) return bloqueado(); const u = id?ROOT
     <label class="full" style="grid-column:1/3">Nome completo<input id="u-n" value="${esc(u?u.nome:'')}" placeholder="Nome do usuário"></label>
     <label>Login (e-mail ou apelido)<input id="u-l" value="${esc(u?u.login:'')}" placeholder="usuario@empresa.com"></label>
     <label>${id?'Nova senha (vazio = manter)':'Senha'}<input type="password" id="u-p" placeholder="${id?'deixar vazio para manter':'mínimo 4 caracteres'}"></label>
+    <label class="full" style="grid-column:1/3">E-mail para recuperação de senha
+      <input type="email" id="u-em" value="${esc(u?(u.email||''):'')}" placeholder="nome@empresa.com.br">
+      <span class="mut sm-t">É para onde vai o link de "esqueci minha senha". Sem e-mail, só um administrador consegue redefinir a senha deste usuário.</span>
+    </label>
     <label>Perfil de acesso
       <select id="u-pf">
         ${(ROOT.perfis||[]).map(pf=>`<option value="${pf.id}" ${(u?u.perfilId||2:2)===pf.id?'selected':''}>${esc(pf.nome)} — ${esc(pf.desc||'')}</option>`).join('')}
@@ -3262,7 +3287,9 @@ window.cadUser = id => { if(!podeEditar()) return bloqueado(); const u = id?ROOT
   <div class="right" style="margin-top:14px"><button class="sec" onclick="closeModal()">Cancelar</button><button id="u-ok">Salvar usuário</button></div>`);
   $('#u-ok').onclick=()=>{
     const n=$('#u-n').value.trim(), lg=$('#u-l').value.trim().toLowerCase(), pw=$('#u-p').value;
+    const em=$('#u-em').value.trim().toLowerCase();
     if(!n||!lg) return alert('Informe nome e login.');
+    if(em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return alert('E-mail inválido.');
     if(ROOT.usuarios.some(x=>x.login===lg && (!u||x.id!==u.id))) return alert('Este login já existe.');
     if(!id && pw.length<4) return alert('A senha deve ter ao menos 4 caracteres.');
     const pfId=+$('#u-pf').value;
@@ -3271,12 +3298,12 @@ window.cadUser = id => { if(!podeEditar()) return bloqueado(); const u = id?ROOT
     const empChecked=[...document.querySelectorAll('[data-emp]')].filter(x=>x.checked).map(x=>+x.dataset.emp);
     const empAccess=empChecked.length===ROOT.empresas.length?[]:empChecked;
     if(id){
-      u.nome=n; u.login=lg; u.admin=!!isAdmin; u.perfilId=pfId; u.empresas=empAccess;
+      u.nome=n; u.login=lg; u.email=em; u.admin=!!isAdmin; u.perfilId=pfId; u.empresas=empAccess;
       if(pw){ if(pw.length<4) return alert('A senha deve ter ao menos 4 caracteres.'); u.salt=rndSalt(); u.hash=hashPw(pw,u.salt); }
       if(!ROOT.usuarios.some(x=>x.admin)){ u.admin=true; u.perfilId=1; alert('É preciso manter ao menos um administrador — perfil revertido.'); }
     } else {
       const salt=rndSalt();
-      ROOT.usuarios.push({id:ROOT.usuarios.reduce((m,x)=>Math.max(m,x.id),0)+1, nome:n, login:lg, salt, hash:hashPw(pw,salt), admin:!!isAdmin, perfilId:pfId, empresas:empAccess, lastLogin:null});
+      ROOT.usuarios.push({id:ROOT.usuarios.reduce((m,x)=>Math.max(m,x.id),0)+1, nome:n, login:lg, email:em, salt, hash:hashPw(pw,salt), admin:!!isAdmin, perfilId:pfId, empresas:empAccess, lastLogin:null});
     }
     save(); closeModal(); render(); };
 };
@@ -3501,12 +3528,11 @@ function vAIStructPanel(){
 
 function vAI(){
   const hasKey = !!aiCfg().key;
-  const isAdmin = !!(USER && (USER.admin || hasPerm('adm')));
-  const adminPanel = isAdmin ? vAIStructPanel() : '';
-  if(!hasKey) return `<h2>Assistente (Claude)</h2>${adminPanel}<div class="panel"><p>Para usar o chat, configure sua <b>chave de API da Anthropic</b> na aba <b>💾 Backup</b>. Crie a chave em <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> (uso pago por chamada).</p></div>`;
-  return `<h2>Assistente (Claude)</h2>
-  ${adminPanel}
-  <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - ${isAdmin?'560px':'130px'});min-height:320px">
+  if(!hasKey) return `<h2>💬 Assistente — Chat</h2><div class="panel">
+    <p>Para conversar com o assistente é preciso configurar a <b>chave de API da Anthropic</b>.</p>
+    <p class="sm-t mut">${ehAdmin()?'Configure em <b>🤖 Assistente → ⚙️ Configuração</b>.':'Peça a um administrador para configurar em <b>Assistente → Configuração</b>.'}</p></div>`;
+  return `<h2>💬 Assistente — Chat</h2>
+  <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - 190px);min-height:320px">
     <p class="sm-t mut" style="margin-bottom:6px">💬 Chat financeiro — pergunte sobre seus lançamentos e relatórios</p>
     <div id="ch-log" style="flex:1;overflow-y:auto;padding:4px">${CHAT.length?CHAT.map(chMsg).join(''):'<p class="mut">Pergunte sobre seus dados: "Quanto gastei com mão de obra em 2025?", "Compare os gastos das obras", "Quem são meus maiores fornecedores?", "Como está o fluxo de caixa este ano?"</p>'}</div>
     <div style="display:flex;gap:8px;margin-top:10px">
@@ -3516,9 +3542,7 @@ function vAI(){
     </div>
   </div>`;
 }
-function bindAI(){
-  if(!aiCfg().key) return;
-
+function bindStructPanel(){
   // ── Gerador de estrutura (admin only) ──────────────────────────────
   const stGen = $('#st-gen');
   if(stGen){
@@ -3587,9 +3611,13 @@ REGRAS:
     const stDiscard = $('#st-discard');
     if(stDiscard) stDiscard.onclick = ()=>{ STRUCT_PREVIEW=null; $('#st-preview').style.display='none'; $('#st-status').textContent=''; };
   }
+}
 
+function bindAI(){
+  if(!aiCfg().key) return;
   // ── Chat financeiro ────────────────────────────────────────────────
   const log=$('#ch-log'), inp=$('#ch-in');
+  if(!log || !inp) return;
   const go = async ()=>{
     const q=inp.value.trim(); if(!q || inp.disabled) return; inp.value='';
     CHAT.push({role:'user',content:q});
@@ -3630,17 +3658,7 @@ function vBkp(){
     <p class="sm-t mut">O navegador pode pedir autorização da pasta uma vez por sessão — a barra amarela no topo avisa quando precisar.</p>
   </div>
   <div class="panel"><h3 style="margin-top:0">🤖 Integração Claude (IA)</h3>
-    <p class="sm-t mut" style="margin-bottom:10px">Crie uma chave de API em <b>console.anthropic.com</b>. A chave fica salva apenas neste navegador (e vai junto no backup JSON — guarde-o com cuidado). O uso é cobrado pela Anthropic por chamada.</p>
-    <div class="flt">
-      <label>Chave de API<input id="ai-key" type="password" style="width:290px" value="${esc(aiCfg().key)}" placeholder="sk-ant-..."></label>
-      <label>Modelo<select id="ai-model">
-        <option value="claude-haiku-4-5-20251001" ${aiCfg().model!=='claude-sonnet-4-6'?'selected':''}>Haiku — rápido e barato</option>
-        <option value="claude-sonnet-4-6" ${aiCfg().model==='claude-sonnet-4-6'?'selected':''}>Sonnet — mais inteligente</option>
-      </select></label>
-      <button id="ai-save">Salvar</button>
-      <button class="sec" id="ai-test">Testar conexão</button>
-    </div>
-    <p class="sm-t mut">Habilita: aba <b>🤖 Assistente</b> (chat sobre os dados), botão <b>Analisar</b> nos relatórios e <b>Classificar com IA</b> na conciliação OFX.</p>
+    <p class="sm-t mut">A configuração da chave de API foi movida para <b>🤖 Assistente → ⚙️ Configuração</b>.</p>
   </div>`;
 }
 function bindBkp(){
@@ -3668,8 +3686,39 @@ function bindBkp(){
   const bdir=$('#bk-dir'); if(bdir) bdir.onclick = bkChooseDir;
   const bnow=$('#bk-now'); if(bnow) bnow.onclick = ()=>autoBackup(true);
   const boff=$('#bk-off'); if(boff) boff.onclick = async ()=>{ if(confirm('Desativar o backup automático?')){ await bkhClear(); BKH=null; updateBkBar(); render(); } };
-  $('#ai-save').onclick = ()=>{ if(!podeEditar()) return bloqueado(); aiCfg().key=$('#ai-key').value.trim(); aiCfg().model=$('#ai-model').value; save(); toast('Configuração da IA salva.'); };
-  $('#ai-test').onclick = async e=>{
+}
+
+/* ============ ASSISTENTE → CONFIGURAÇÃO (admin) ============ */
+function ehAdmin(){ return !!(USER && (USER.admin || hasPerm('adm'))); }
+function vAICfg(){
+  if(!ehAdmin()) return `<h2>⚙️ Configuração do Assistente</h2><div class="panel">
+    <p>Esta área é restrita a administradores.</p>
+    <p class="sm-t mut">Você pode usar o chat em <b>🤖 Assistente → 💬 Chat</b>.</p></div>`;
+  const cfg = aiCfg();
+  return `<h2>⚙️ Configuração do Assistente</h2>
+  <div class="panel">
+    <h3 style="margin-top:0">🔑 Chave de API da Anthropic</h3>
+    <p class="sm-t mut" style="margin-bottom:10px">Crie a chave em <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>. Ela habilita o chat sobre os dados, o botão <b>Analisar</b> nos relatórios, o <b>Classificar com IA</b> na conciliação OFX e a leitura automática de notas em Documentos. O uso é cobrado pela Anthropic por chamada.</p>
+    <div class="flt">
+      <label>Chave de API<input id="ai-key" type="password" style="width:290px" value="${esc(cfg.key)}" placeholder="sk-ant-..."></label>
+      <label>Modelo<select id="ai-model">
+        <option value="claude-haiku-4-5-20251001" ${cfg.model!=='claude-sonnet-4-6'?'selected':''}>Haiku — rápido e barato</option>
+        <option value="claude-sonnet-4-6" ${cfg.model==='claude-sonnet-4-6'?'selected':''}>Sonnet — mais inteligente</option>
+      </select></label>
+      <button id="ai-save">Salvar</button>
+      <button class="sec" id="ai-test">Testar conexão</button>
+      <span class="sm-t ${cfg.key?'pos':'mut'}" style="align-self:flex-end;padding-bottom:6px">${cfg.key?'✓ chave configurada':'sem chave — recursos de IA desativados'}</span>
+    </div>
+    <p class="sm-t mut" style="margin-top:10px">A chave é gravada no banco do sistema e vai junto no backup JSON — guarde o backup com cuidado.</p>
+  </div>
+  ${vAIStructPanel()}`;
+}
+function bindAICfg(){
+  if(!ehAdmin()) return;
+  const sv = $('#ai-save');
+  if(sv) sv.onclick = ()=>{ if(!podeEditar()) return bloqueado(); aiCfg().key=$('#ai-key').value.trim(); aiCfg().model=$('#ai-model').value; save(); render(); toast('Configuração da IA salva.'); };
+  const tt = $('#ai-test');
+  if(tt) tt.onclick = async e=>{
     if(!podeEditar()) return bloqueado();
     aiCfg().key=$('#ai-key').value.trim(); aiCfg().model=$('#ai-model').value; save();
     e.target.disabled=true; e.target.textContent='Testando...';
@@ -3677,6 +3726,7 @@ function bindBkp(){
     catch(err){ alert('Falha na conexão: '+err.message); }
     e.target.disabled=false; e.target.textContent='Testar conexão';
   };
+  bindStructPanel();
 }
 
 /* ============ MODAL ============ */
@@ -3754,10 +3804,17 @@ function refreshSide(){
   }
   updateEmpBar();
   const na = $('#navAdm'); if(na) na.style.display = (USER && hasPerm('adm')) ? 'block' : 'none';
-  ['dash','lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','contab','bkp'].forEach(mod=>{
+  ['dash','lanc','conc','rel','grupo','cad','favs','cpr','emailcfg','docs','contab','bkp'].forEach(mod=>{
     const el=document.querySelector(`#nav [data-v="${mod}"]`);
     if(el) el.style.display = hasPerm(mod)?'':'none';
   });
+  // Grupo "Assistente": o pai some junto com a permissão; a Configuração é só de admin
+  const aiGrp = document.getElementById('navAiGrp');
+  if(aiGrp) aiGrp.style.display = hasPerm('ai') ? '' : 'none';
+  const aiCfgLink = document.getElementById('navAiCfg');
+  if(aiCfgLink && !ehAdmin()) aiCfgLink.classList.remove('show');
+  if(!hasPerm('ai')) toggleGrupoNav('ai', false);
+  else if(VIEW==='ai' || VIEW==='aicfg') toggleGrupoNav('ai', true);
   const ub = $('#userBox');
   if(ub){
     ub.innerHTML = USER ? `👤 ${esc(USER.nome)}${USER.admin?' <span class="badge b-acc">admin</span>':''}<br><a href="#" id="lnkSair" style="color:#8ab">Sair</a>` : '';
@@ -3773,7 +3830,8 @@ function showLogin(msg){
       <label>Senha<input type="password" id="lg-p" autocomplete="current-password"></label>
     </div>
     ${msg?'<p class="neg sm-t" style="margin:6px 0 0">'+esc(msg)+'</p>':''}
-    <button id="lg-ok" style="width:100%;margin-top:12px">Entrar</button></div>`;
+    <button id="lg-ok" style="width:100%;margin-top:12px">Entrar</button>
+    <p style="text-align:center;margin-top:12px"><a href="#" id="lg-esqueci" style="color:var(--acc);font-size:12.5px">Esqueci minha senha</a></p></div>`;
   const go = ()=>{
     const u = ROOT.usuarios.find(x=>x.login === $('#lg-u').value.trim().toLowerCase());
     if(!u || u.hash !== hashPw($('#lg-p').value, u.salt)) return showLogin('Login ou senha incorretos.');
@@ -3784,8 +3842,107 @@ function showLogin(msg){
     el.style.display = 'none'; refreshSide(); render();
   };
   $('#lg-ok').onclick = go;
+  $('#lg-esqueci').onclick = e=>{ e.preventDefault(); showEsqueci($('#lg-u').value.trim()); };
   el.querySelectorAll('input').forEach(i=>i.onkeydown = e=>{ if(e.key==='Enter') go(); });
   setTimeout(()=>{ const f=$('#lg-u'); if(f) f.focus(); }, 50);
+}
+
+/* ── Esqueci minha senha: pede o login/e-mail e dispara o envio ────────── */
+function showEsqueci(preencher){
+  const el = $('#login'); el.style.display = 'flex';
+  el.innerHTML = `<div class="lcard"><h2 style="margin-bottom:4px">🔑 Recuperar senha</h2>
+    <p class="mut sm-t" style="margin-bottom:14px">Informe seu login ou o e-mail cadastrado. Enviaremos um link para você criar uma nova senha.</p>
+    <div class="fgrid" style="grid-template-columns:1fr">
+      <label>Login ou e-mail<input id="rc-u" value="${esc(preencher||'')}" autocomplete="username"></label>
+    </div>
+    <div id="rc-msg" style="margin-top:10px"></div>
+    <button id="rc-ok" style="width:100%;margin-top:12px">Enviar link de recuperação</button>
+    <p style="text-align:center;margin-top:12px"><a href="#" id="rc-voltar" style="color:var(--acc);font-size:12.5px">← Voltar para o login</a></p></div>`;
+  const msg = (txt, cls)=>{ $('#rc-msg').innerHTML = `<p class="${cls||'mut'} sm-t" style="margin:0">${esc(txt)}</p>`; };
+  const enviar = async ()=>{
+    const alvo = $('#rc-u').value.trim();
+    if(!alvo) return msg('Informe seu login ou e-mail.', 'neg');
+    const b = $('#rc-ok'); b.disabled = true; b.textContent = 'Enviando…';
+    try{
+      const r = await fetch('/api/recuperar-senha', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ login: alvo })
+      });
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || 'Falha no envio.');
+      $('#rc-msg').innerHTML = `<div style="background:#eafaf1;border:1px solid #bfe8d2;border-radius:6px;padding:10px 12px">
+        <p class="sm-t" style="margin:0"><b>Pedido registrado.</b> Se houver uma conta com esse login ou e-mail, o link chega em instantes.</p>
+        <p class="sm-t mut" style="margin:6px 0 0">Confira também a caixa de spam. O link vale por 1 hora.</p></div>`;
+      b.style.display = 'none';
+    }catch(e){
+      msg(e.message, 'neg');
+      b.disabled = false; b.textContent = 'Enviar link de recuperação';
+    }
+  };
+  $('#rc-ok').onclick = enviar;
+  $('#rc-u').onkeydown = e=>{ if(e.key==='Enter') enviar(); };
+  $('#rc-voltar').onclick = e=>{ e.preventDefault(); showLogin(); };
+  setTimeout(()=>{ const f=$('#rc-u'); if(f) f.focus(); }, 50);
+}
+
+/* ── Nova senha: aberta pelo link do e-mail (?rt=TOKEN) ────────────────── */
+async function showNovaSenha(token){
+  const el = $('#login'); el.style.display = 'flex';
+  el.innerHTML = `<div class="lcard"><h2 style="margin-bottom:4px">🔑 Nova senha</h2>
+    <p class="mut sm-t">Verificando o link…</p></div>`;
+  let info;
+  try{
+    const r = await fetch('/api/token-valido?t='+encodeURIComponent(token));
+    info = await r.json();
+  }catch(e){ info = { ok:false }; }
+
+  if(!info.ok){
+    el.innerHTML = `<div class="lcard"><h2 style="margin-bottom:4px">🔑 Link inválido</h2>
+      <p class="sm-t" style="margin-bottom:14px">Este link expirou ou já foi usado. Peça um novo na tela de login.</p>
+      <button id="ns-voltar" style="width:100%">Voltar para o login</button></div>`;
+    $('#ns-voltar').onclick = ()=>{ limparTokenURL(); showLogin(); };
+    return;
+  }
+
+  el.innerHTML = `<div class="lcard"><h2 style="margin-bottom:4px">🔑 Nova senha</h2>
+    <p class="mut sm-t" style="margin-bottom:14px">Olá, <b>${esc(info.nome||info.login)}</b>. Defina sua nova senha de acesso.</p>
+    <div class="fgrid" style="grid-template-columns:1fr">
+      <label>Nova senha<input type="password" id="ns-p" autocomplete="new-password" placeholder="mínimo 6 caracteres"></label>
+      <label>Repita a nova senha<input type="password" id="ns-p2" autocomplete="new-password"></label>
+    </div>
+    <div id="ns-msg" style="margin-top:10px"></div>
+    <button id="ns-ok" style="width:100%;margin-top:12px">Salvar nova senha</button></div>`;
+  const msg = (txt, cls)=>{ $('#ns-msg').innerHTML = `<p class="${cls||'mut'} sm-t" style="margin:0">${esc(txt)}</p>`; };
+  const salvar = async ()=>{
+    const p = $('#ns-p').value, p2 = $('#ns-p2').value;
+    if(p.length < 6) return msg('A senha deve ter ao menos 6 caracteres.', 'neg');
+    if(p !== p2)     return msg('As senhas não conferem.', 'neg');
+    const b = $('#ns-ok'); b.disabled = true; b.textContent = 'Salvando…';
+    try{
+      const r = await fetch('/api/redefinir-senha', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ token, senha:p })
+      });
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || 'Falha ao redefinir.');
+      limparTokenURL();
+      // recarrega os dados do servidor para pegar o novo hash antes de logar
+      try{ const nr = await loadRoot(); if(nr && nr.empresas){ ROOT = ensurePerfis(nr); setEmp(ROOT.empAtual); } }catch(e){}
+      el.innerHTML = `<div class="lcard"><h2 style="margin-bottom:4px">✅ Senha alterada</h2>
+        <p class="sm-t" style="margin-bottom:14px">Sua nova senha já está valendo. Entre com ela agora.</p>
+        <button id="ns-login" style="width:100%">Ir para o login</button></div>`;
+      $('#ns-login').onclick = ()=>showLogin();
+    }catch(e){
+      msg(e.message, 'neg');
+      b.disabled = false; b.textContent = 'Salvar nova senha';
+    }
+  };
+  $('#ns-ok').onclick = salvar;
+  el.querySelectorAll('input').forEach(i=>i.onkeydown = e=>{ if(e.key==='Enter') salvar(); });
+  setTimeout(()=>{ const f=$('#ns-p'); if(f) f.focus(); }, 50);
+}
+function limparTokenURL(){
+  try{ history.replaceState(null, '', location.pathname); }catch(e){}
 }
 function showSetup(){
   const el = $('#login'); el.style.display = 'flex';
@@ -3819,6 +3976,9 @@ function syncStatus(s){
   else if(s==='err'){     b.style.cssText='position:fixed;bottom:12px;right:12px;font-size:11px;padding:4px 10px;border-radius:12px;z-index:8000;background:#fee2e2;color:#991b1b;display:block'; b.textContent='⚠️ Erro ao sincronizar'; }
 }
 function boot(){
+  // Link de redefinição de senha vindo do e-mail tem prioridade sobre tudo
+  const rt = new URLSearchParams(location.search).get('rt');
+  if(rt){ showNovaSenha(rt); return; }
   if(!ROOT.usuarios.length){ showSetup(); return; }
   let sid = 0; try{ sid = +(sessionStorage.getItem('sfc_user')||0); }catch(e){}
   const u = ROOT.usuarios.find(x=>x.id===sid);
