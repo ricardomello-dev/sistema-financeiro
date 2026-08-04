@@ -291,8 +291,9 @@ function grupoDe(nome){ return String(nome||'').split(':')[0].trim(); }
 function subDe(nome){ const p=String(nome||'').split(':'); return p.slice(1).join(':').trim(); }
 function tipoOrd(tipo){ return tipo==='R'?0:tipo==='T'?1:2; }
 function planoSort(a,b){ const ta=tipoOrd(a.tipo), tb=tipoOrd(b.tipo); return ta!==tb ? ta-tb : (a.nome||'').localeCompare(b.nome||''); }
-function selCC(sel, blank, allowNew){ return selOpts(DB.ccustos, sel, blank) + (allowNew?'<option value="__new">➕ Criar novo centro de custo…</option>':''); }
+function selCC(sel, blank, allowNew){ return selOpts(DB.ccustos, sel, blank) + ((allowNew&&podeEditar())?'<option value="__new">➕ Criar novo centro de custo…</option>':''); }
 function criarPlanoRapido(dirHint, onDone){
+  if(!podeEditar()) return bloqueado();
   // Collect existing groups for datalist
   const grupos = [...new Set(DB.planos.map(p=>p.nome.includes(':')?p.nome.split(':')[0]:p.nome))].sort();
   openModal(`<h3>➕ Novo plano de conta</h3>
@@ -326,6 +327,7 @@ function criarPlanoRapido(dirHint, onDone){
   };
 }
 function criarCCRapido(onDone){
+  if(!podeEditar()) return bloqueado();
   openModal(`<h3>➕ Novo centro de custo</h3>
   <div class="fgrid">
     <label class="full">Nome
@@ -348,6 +350,7 @@ function criarCCRapido(onDone){
   };
 }
 function selPl(sel, blank, allowNew){
+  if(allowNew && !podeEditar()) allowNew = false;
   const G = {};
   DB.planos.forEach(p=>{ const gr=grupoDe(p.nome); (G[gr]=G[gr]||[]).push(p); });
   let h = blank ? '<option value="">'+blank+'</option>' : '';
@@ -541,6 +544,9 @@ function docsLancOpts(d){
     + (scored.length===0?`<option value="" disabled>Nenhum candidato</option>`:'');
 }
 function vDocs(){
+  if(!podeEditar()) return `<h2>📎 Documentos</h2><div class="panel">
+    <p>🔒 Seu perfil é somente leitura. O envio de documentos altera os lançamentos, por isso está indisponível.</p>
+    <p class="sm-t mut">Os documentos já anexados aparecem com o ícone 📎 na aba <b>Lançamentos</b>.</p></div>`;
   const hasDocs = DOCS_SESSION.length>0;
   const nMatched = DOCS_SESSION.filter(d=>d.status==='matched').length;
   const nPending = DOCS_SESSION.filter(d=>d.status==='pending').length;
@@ -648,6 +654,7 @@ function refreshDocsRow(idx){
 }
 
 function bindDocs(){
+  if(!podeEditar()) return;
   const drop = document.getElementById('docs-drop');
   const inp  = document.getElementById('docs-inp');
   if(!drop||!inp) return;
@@ -793,8 +800,8 @@ function vCpr(){
     <button class="sec" id="cf-clr">Limpar</button>
   </div>
   <div class="toolbar">
-    <button id="cp-novo">+ Nova conta a pagar</button>
-    <button class="sec" id="cp-gerar" title="Gerar próxima ocorrência para contas recorrentes já pagas">🔄 Gerar recorrentes</button>
+    ${podeEditar()?`<button id="cp-novo">+ Nova conta a pagar</button>
+    <button class="sec" id="cp-gerar" title="Gerar próxima ocorrência para contas recorrentes já pagas">🔄 Gerar recorrentes</button>`:'<span class="badge b-mut">🔒 somente leitura</span>'}
     <span class="mut sm-t">${rows.length} registros</span>
   </div>
   <div class="panel"><table>
@@ -809,9 +816,9 @@ function vCpr(){
         <td class="r neg">${fmt(-Math.abs(cp.valor))}</td>
         <td>${cpStatusBadge(cp)}</td>
         <td style="white-space:nowrap">
-          ${st!=='pago'&&st!=='cancelado'?`<button class="sm ok" data-cp-pagar="${cp.id}">✓ Pagar</button> `:''}
+          ${podeEditar()?`${st!=='pago'&&st!=='cancelado'?`<button class="sm ok" data-cp-pagar="${cp.id}">✓ Pagar</button> `:''}
           <button class="sm sec" data-cp-ed="${cp.id}">✏️</button>
-          <button class="sm sec" data-cp-del="${cp.id}">🗑️</button>
+          <button class="sm sec" data-cp-del="${cp.id}">🗑️</button>`:''}
         </td>
       </tr>`;
     }).join('')}
@@ -845,6 +852,7 @@ function bindCpr(){
   });
 }
 function editCpr(id){
+  if(!podeEditar()) return bloqueado();
   if(!DB.contas_pagar) DB.contas_pagar=[];
   const cp = id ? DB.contas_pagar.find(x=>x.id===id) : {id:null,desc:'',fav:'',valor:0,vencimento:today(),pl:'',cc:'',ct:DB.contas[0]?.id||'',periodicidade:'unica',status:'pendente',obs:'',email_origem:null};
   openModal(`<h3>${id?'Editar':'Nova'} Conta a Pagar</h3>
@@ -871,6 +879,7 @@ function editCpr(id){
   };
 }
 function pagarCP(id){
+  if(!podeEditar()) return bloqueado();
   if(!DB.contas_pagar) return;
   const cp=DB.contas_pagar.find(x=>x.id===id); if(!cp) return;
   openModal(`<h3>Registrar Pagamento</h3>
@@ -916,6 +925,8 @@ function emailCfgData(){
 function emailCfg(){ return emailCfgData(); }
 
 function vEmailCfg(){
+  if(!podeEditar()) return `<h2>📧 E-mail</h2><div class="panel">
+    <p>🔒 Seu perfil é somente leitura. A configuração de contas de e-mail está indisponível.</p></div>`;
   const cfg=emailCfgData();
   const tab=window._emailTab||'contas';
   const tabs=[{k:'contas',l:'📬 Contas conectadas'},{k:'keywords',l:'🔍 Palavras-chave'},{k:'rules',l:'⚡ Regras'},{k:'hist',l:'📋 Histórico'}];
@@ -1036,6 +1047,7 @@ function vEmailCfg(){
 }
 
 function bindEmailCfg(){
+  if(!podeEditar()) return;
   const cfg=emailCfgData();
   // tab switching
   document.querySelectorAll('[data-email-tab]').forEach(b=>b.onclick=()=>{ window._emailTab=b.dataset.emailTab; render(); });
@@ -1087,6 +1099,7 @@ function bindEmailCfg(){
 }
 
 window.editEmailConta = function(id){
+  if(!podeEditar()) return bloqueado();
   const cfg=emailCfgData();
   const ct=id?cfg.contas.find(x=>x.id===id):null;
   openModal(`<h3>${id?'Editar':'Nova'} conta de e-mail</h3>
@@ -1124,6 +1137,7 @@ function bindAdm(){
   const pfNovo=$('#pf-novo'); if(pfNovo) pfNovo.onclick=()=>editPerfil(null);
   document.querySelectorAll('[data-pf-ed]').forEach(b=>b.onclick=()=>editPerfil(+b.dataset.pfEd));
   document.querySelectorAll('[data-pf-del]').forEach(b=>b.onclick=()=>{
+    if(!podeEditar()) return bloqueado();
     const pid=+b.dataset.pfDel;
     if(ROOT.usuarios.some(u=>u.perfilId===pid)) return alert('Não é possível excluir: perfil em uso por usuários.');
     if(!confirm('Excluir este perfil?')) return;
@@ -1133,6 +1147,7 @@ function bindAdm(){
   const usrNovo=$('#usr-novo'); if(usrNovo) usrNovo.onclick=()=>cadUser(null);
 }
 window.editUserPerms = function(id){
+  if(!podeEditar()) return bloqueado();
   const u=ROOT.usuarios.find(x=>x.id===id); if(!u) return;
   const MODS=[
     {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
@@ -1140,7 +1155,7 @@ window.editUserPerms = function(id){
     {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
     {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
-    {k:'saldos',l:'💰 Ver saldos das contas'}
+    {k:'saldos',l:'💰 Ver saldos das contas'},{k:'editar',l:'✏️ Criar, alterar e excluir dados'}
   ];
   const pf=perfil(u);
   openModal(`<h3>🔑 Permissões — ${esc(u.nome)}</h3>
@@ -1169,6 +1184,7 @@ window.editUserPerms = function(id){
   };
 };
 window.editPerfil = function(id){
+  if(!podeEditar()) return bloqueado();
   if(!ROOT.perfis) ROOT.perfis=[];
   const pf=id?(ROOT.perfis.find(x=>x.id===id)||null):null;
   const MODS=[
@@ -1177,7 +1193,7 @@ window.editPerfil = function(id){
     {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
     {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
-    {k:'saldos',l:'💰 Ver saldos das contas'}
+    {k:'saldos',l:'💰 Ver saldos das contas'},{k:'editar',l:'✏️ Criar, alterar e excluir dados'}
   ];
   openModal(`<h3>${id?'Editar':'Novo'} Perfil</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px">
@@ -1239,6 +1255,9 @@ window.goPendentes = ()=>{ LF={de:'',ate:'',ct:'',tipo:'',pl:'',cc:'',q:'',rec:'
 function saldoConta(id){ return round2((conta(id).saldoIni||0) + DB.lancs.filter(l=>l.ct===id).reduce((s,l)=>s+l.v,0)); }
 /* Permissão 'saldos': quando ausente, saldos de conta ficam ocultos para o usuário */
 function verSaldos(){ return hasPerm('saldos'); }
+/* Permissão 'editar': quando ausente, o usuário só consulta — nada de criar, alterar ou excluir */
+function podeEditar(){ return hasPerm('editar'); }
+function bloqueado(){ toast('🔒 Seu perfil é somente leitura — você não pode alterar dados.'); return false; }
 function vDash(){
   if(USER && !hasPerm('dash')) return `<h2>Sem acesso</h2><div class="panel">
     <p>Seu perfil não tem nenhum módulo liberado. Peça a um administrador para revisar suas permissões em <b>Administração → Perfis</b>.</p></div>`;
@@ -1591,6 +1610,7 @@ function gRelatorios(g, emps){
 
 /* ── Modal: criar / editar grupo ─────────────────────────────────── */
 function editGrupo(id){
+  if(!podeEditar()) return bloqueado();
   const g = id ? grupos().find(x=>x.id===id) : { id:null, nome:'', empresas:[] };
   if(!g) return toast('Grupo não encontrado.');
   const disp = userEmps();
@@ -1735,7 +1755,7 @@ function vLanc(){
   </div>
   ${periodBtns('lf', LF.de, LF.ate)}
   <div class="toolbar">
-    <button id="b-novo">+ Novo lançamento</button>
+    ${podeEditar()?'<button id="b-novo">+ Novo lançamento</button>':'<span class="badge b-mut">🔒 somente leitura</span>'}
     <button class="sec" id="b-csv">Exportar CSV</button>
     <span class="mut sm-t">Exibindo <b>${shown.length}</b> de <b>${rows.length}</b> lançamentos — total: <b class="${tot<0?'neg':'pos'}">${fmt(tot)}</b></span>
   </div>
@@ -1745,7 +1765,7 @@ function vLanc(){
       <td>${fmtD(l.data)}</td><td>${esc(l.fav)}</td><td class="sm-t">${l.parts&&l.parts.length?`<span class="badge b-acc" title="${esc(splitTitle(l))}">rateado ×${l.parts.length}</span>`:esc(planoN(l.pl))}</td><td class="sm-t">${l.parts&&l.parts.length?'<span class="mut">vários</span>':esc(ccN(l.cc))}</td>
       <td class="hist" title="${esc(l.hist)}">${esc(l.hist)} ${l.fitid?'<span class="badge b-ok" title="Conciliado via OFX">✓</span>':'<span class="badge b-warn" title="Ainda não conciliado com extrato OFX">⏳</span>'}</td>
       <td class="sm-t">${esc(contaN(l.ct))}</td><td class="r ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td>
-      <td style="white-space:nowrap"><button class="sm sec" data-ed="${l.id}">✏️</button> <button class="sm sec" data-del="${l.id}">🗑️</button>${l.docs&&l.docs.length?` <span class="badge b-acc" title="${l.docs.length} doc(s) anexado(s)">📎 ${l.docs.length}</span>`:''}</td>
+      <td style="white-space:nowrap">${podeEditar()?`<button class="sm sec" data-ed="${l.id}">✏️</button> <button class="sm sec" data-del="${l.id}">🗑️</button>`:''}${l.docs&&l.docs.length?` <span class="badge b-acc" title="${l.docs.length} doc(s) anexado(s)">📎 ${l.docs.length}</span>`:''}</td>
     </tr>`).join('')}
   </table>
   ${rows.length>shown.length?`<div style="display:flex;gap:8px;justify-content:center;align-items:center;padding:12px;flex-wrap:wrap">
@@ -1760,7 +1780,7 @@ function bindLanc(){
   [['f-de','de'],['f-ate','ate'],['f-ct','ct'],['f-tipo','tipo'],['f-pl','pl'],['f-cc','cc'],['f-rec','rec']].forEach(([id,k])=>{ $('#'+id).onchange = e=>{ LF[k]=e.target.value; LF.lim=200; re(); }; });
   $('#f-q').oninput = e=>{ LF.q=e.target.value; LF.lim=200; clearTimeout(window._qh); window._qh=setTimeout(re,300); };
   $('#f-clr').onclick = ()=>{ LF={de:'',ate:'',ct:'',tipo:'',pl:'',cc:'',q:'',rec:'',lim:200,sortCol:'data',sortDir:-1}; re(); };
-  $('#b-novo').onclick = ()=>editLanc(null);
+  const bnv = $('#b-novo'); if(bnv) bnv.onclick = ()=>editLanc(null);
   $('#b-csv').onclick = ()=>{
     const rows = [['Data','Tipo','Favorecido','Plano de Conta','Centro de Custo','Conta','Histórico','Valor','Observações']];
     filtLancs().forEach(l=>lparts(l).forEach(p=>rows.push([fmtD(l.data),TIPOS[l.tipo],l.fav,planoN(p.pl),ccN(p.cc),contaN(l.ct),l.hist+(p.d?' — '+p.d:''),nBR(p.v),l.obs||''])));
@@ -1777,6 +1797,7 @@ function bindLanc(){
   });
 }
 function editLanc(id, ofx){
+  if(!podeEditar()) return bloqueado();
   const l = id ? DB.lancs.find(x=>x.id===id) : { id:null, data:ofx?ofx.data:today(), tipo:ofx?(ofx.v<0?'P':'D'):'P', fav:ofx?(ofx.fav||''):'', pl:ofx?(ofx.pl||''):'', cc:ofx?(ofx.cc||''):'', ct:ofx?ofx.ct:DB.contas[0].id, hist:ofx?ofx.hist:'', v:ofx?ofx.v:0, st:'C', obs:'', fitid:null, parts:null };
   const hasParts = !!(l.parts && l.parts.length);
   openModal(`<h3>${id?'Editar':'Novo'} lançamento${ofx?' (OFX)':''}</h3>
@@ -1918,17 +1939,22 @@ function vPend(){
     <label>Até<input type="date" id="p-ate" value="${PF.ate}"></label>
     <label>Conta<select id="p-ct">${selOpts(DB.contas, +PF.ct, 'Todas')}</select></label>
     <label>Buscar<input id="p-q" value="${esc(PF.q)}" placeholder="favorecido, histórico..."></label>
-    ${rows.length?`<button class="ok" id="p-all">✓ Conciliar todos os listados (${rows.length})</button>`:''}
+    ${(rows.length&&podeEditar())?`<button class="ok" id="p-all">✓ Conciliar todos os listados (${rows.length})</button>`:''}
   </div>
   <div class="panel">${rows.length?`<table>
     <tr><th>Data</th><th>Favorecido</th><th>Plano de Conta</th><th>Centro de Custo</th><th>Histórico</th><th class="r">Valor</th><th></th></tr>
     ${shown.map(l=>`<tr><td>${fmtD(l.data)}</td><td>${esc(l.fav)}</td><td class="sm-t">${l.parts&&l.parts.length?`<span class="badge b-acc" title="${esc(splitTitle(l))}">rateado ×${l.parts.length}</span>`:esc(planoN(l.pl))}</td><td class="sm-t">${l.parts&&l.parts.length?'<span class="mut">vários</span>':esc(ccN(l.cc))}</td><td class="hist" title="${esc(l.hist)}">${esc(l.hist)}</td><td class="r ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td>
-    <td style="white-space:nowrap"><button class="sm ok" data-pc="${l.id}" title="Marcar como conciliado">✓ Conciliar</button> <button class="sm sec" data-pe="${l.id}" title="Editar">✏️</button> <button class="sm sec" data-pd="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
+    <td style="white-space:nowrap">${podeEditar()?`<button class="sm ok" data-pc="${l.id}" title="Marcar como conciliado">✓ Conciliar</button> <button class="sm sec" data-pe="${l.id}" title="Editar">✏️</button> <button class="sm sec" data-pd="${l.id}" title="Excluir">🗑️</button>`:''}</td></tr>`).join('')}
   </table>
   ${rows.length>PF.lim?`<div style="text-align:center;padding:10px"><button class="sec" id="p-more">Mostrar mais (${rows.length-PF.lim} restantes)</button></div>`:''}`:'<p class="mut">Nenhum lançamento pendente de conciliação. ✓</p>'}</div>`;
 }
 function vConc(){
   let body;
+  if(!podeEditar()){
+    return `<h2>Conciliação OFX</h2><div class="panel">
+      <p>🔒 Seu perfil é somente leitura. A conciliação cria e altera lançamentos, por isso está indisponível.</p>
+      <p class="sm-t mut">Você pode consultar os lançamentos já conciliados na aba <b>Lançamentos</b>.</p></div>`;
+  }
   if(!OFX){
     body = `<div class="panel">
       <p style="margin-bottom:10px">Importe o extrato OFX do seu banco. O sistema identifica automaticamente lançamentos já existentes e sugere <b>favorecido, plano de conta e centro de custo</b> com base no histórico de ${DB.lancs.length + (SEED.learn||[]).length} lançamentos.</p>
@@ -1969,6 +1995,7 @@ function vConc(){
   return `<h2>Conciliação bancária (OFX)</h2>${body}`;
 }
 function bindConc(){
+  if(!podeEditar()) return;
   if(!OFX){
     [['p-de','de'],['p-ate','ate'],['p-ct','ct']].forEach(([id,k])=>{ const el=$('#'+id); if(el) el.onchange = e=>{ PF[k]=e.target.value; PF.lim=100; render(); }; });
     const pq = $('#p-q'); if(pq) pq.oninput = e=>{ PF.q=e.target.value; PF.lim=100; clearTimeout(window._ph); window._ph=setTimeout(render,300); };
@@ -2512,7 +2539,7 @@ function vContab(){
   <div class="toolbar">
     <button id="ct-gerar" ${L.length?'':'disabled'}>📦 Gerar pacote para a contabilidade</button>
     <button class="sec" id="ct-csv">Baixar só o índice (CSV)</button>
-    ${podeGerirGrupos()&&jaEnv?`<button class="sec" id="ct-desmarcar">↩️ Desmarcar envios do período</button>`:''}
+    ${(podeGerirGrupos()&&podeEditar()&&jaEnv)?`<button class="sec" id="ct-desmarcar">↩️ Desmarcar envios do período</button>`:''}
   </div>
   ${semDoc.length?`<div class="panel" style="border-left:4px solid var(--bad)">
     <h3 style="margin-top:0">⚠️ ${semDoc.length} lançamento(s) sem documento anexado</h3>
@@ -2646,6 +2673,9 @@ DÚVIDAS
   const a = document.createElement('a'); a.href=url; a.download=fname; a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 5000);
 
+  if(!podeEditar()){   // somente leitura: baixa o pacote, mas não marca nada
+    return toast(`Pacote gerado: ${docCount} documento(s).`);
+  }
   const marcaveis = L.filter(l=>okIds.has(l.id));   // só os que tiveram documento incluído
   const pendentes = L.length - marcaveis.length;
   if(!marcaveis.length){
@@ -2697,24 +2727,28 @@ function usoPlano(id){ return DB.lancs.filter(l=>lparts(l).some(p=>p.pl===id)).l
 function usoCC(id){ return DB.lancs.filter(l=>lparts(l).some(p=>p.cc===id)).length; }
 function usoConta(id){ return DB.lancs.filter(l=>l.ct===id).length; }
 function vCad(){
+  const ed = podeEditar();
+  const btnNovo = (fn)=> ed ? `<button class="sm" onclick="${fn}">+ Novo</button>` : '';
+  const acoes = (cadFn, delFn)=> ed ? `<button class="sm sec" onclick="${cadFn}">✏️</button> <button class="sm sec" onclick="${delFn}">🗑️</button>` : '';
   return `<h2>Cadastros</h2>
+  ${ed?'':'<div class="panel" style="border-left:4px solid var(--warn);padding:10px 14px"><span class="sm-t">🔒 Seu perfil é somente leitura — os cadastros podem ser consultados, mas não alterados.</span></div>'}
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
-    <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Contas bancárias <button class="sm" onclick="cadConta(null)">+ Nova</button></h3>
+    <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Contas bancárias ${btnNovo('cadConta(null)')}</h3>
       <table><tr><th>Nome</th>${verSaldos()?'<th class="r">Saldo inicial</th><th class="r">Saldo atual</th>':''}<th></th></tr>
       ${DB.contas.map(c=>`<tr><td>${esc(c.nome)}${c.banco?' <span class="mut sm-t">('+esc(c.banco)+')</span>':''}</td>${verSaldos()?`<td class="r">${fmt(c.saldoIni||0)}</td><td class="r">${fmt(saldoConta(c.id))}</td>`:''}
-      <td style="white-space:nowrap"><button class="sm sec" onclick="cadConta(${c.id})">✏️</button> <button class="sm sec" onclick="delConta(${c.id})">🗑️</button></td></tr>`).join('')}</table></div>
-    <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Plano de contas <button class="sm" onclick="cadPlano(null)">+ Novo</button></h3>
+      <td style="white-space:nowrap">${acoes(`cadConta(${c.id})`,`delConta(${c.id})`)}</td></tr>`).join('')}</table></div>
+    <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Plano de contas ${btnNovo('cadPlano(null)')}</h3>
       <table><tr><th>Nome</th><th>Tipo</th><th class="r">Usos</th><th></th></tr>
       ${(()=>{ let out='', last=null, lastTipo=null; for(const p of [...DB.planos].sort(planoSort)){ const gr=grupoDe(p.nome), sub=subDe(p.nome);
         if(p.tipo !== lastTipo){ const lbl=p.tipo==='R'?'💚 RECEITAS':p.tipo==='D'?'🔴 DESPESAS':'🔄 TRANSFERÊNCIAS'; out+=`<tr style="background:${p.tipo==='R'?'#edfaf1':p.tipo==='D'?'#fff5f5':'#f0f4ff'};font-weight:700;font-size:13px"><td colspan="4" style="padding:8px 12px;letter-spacing:.5px">${lbl}</td></tr>`; lastTipo=p.tipo; last=null; }
         if(gr!==last){ out+=`<tr style="background:#f8fafc;font-weight:600"><td colspan="4" style="padding-left:12px">📁 ${esc(gr)}</td></tr>`; last=gr; }
         out+=`<tr><td style="padding-left:24px">${esc(sub||'(geral)')}</td><td><span class="badge ${p.tipo==='R'?'b-ok':p.tipo==='D'?'b-bad':'b-mut'}">${p.tipo==='R'?'Receita':p.tipo==='D'?'Despesa':p.tipo==='T'?'Transferência':'Misto'}</span></td><td class="r">${usoPlano(p.id)}</td>
-      <td style="white-space:nowrap"><button class="sm sec" onclick="cadPlano(${p.id})">✏️</button> <button class="sm sec" onclick="delPlano(${p.id})">🗑️</button></td></tr>`; } return out; })()}</table>
+      <td style="white-space:nowrap">${acoes(`cadPlano(${p.id})`,`delPlano(${p.id})`)}</td></tr>`; } return out; })()}</table>
       <p class="mut sm-t" style="margin-top:8px">Use “:” para hierarquia, ex.: OBRAS:MAO DE OBRA</p></div>
-    <div class="panel" style="flex:1;min-width:280px"><h3 style="margin-top:0">Centros de custo <button class="sm" onclick="cadCC(null)">+ Novo</button></h3>
+    <div class="panel" style="flex:1;min-width:280px"><h3 style="margin-top:0">Centros de custo ${btnNovo('cadCC(null)')}</h3>
       <table><tr><th>Nome</th><th class="r">Usos</th><th></th></tr>
       ${DB.ccustos.map(c=>`<tr><td>${esc(c.nome)}</td><td class="r">${usoCC(c.id)}</td>
-      <td style="white-space:nowrap"><button class="sm sec" onclick="cadCC(${c.id})">✏️</button> <button class="sm sec" onclick="delCC(${c.id})">🗑️</button></td></tr>`).join('')}</table>
+      <td style="white-space:nowrap">${acoes(`cadCC(${c.id})`,`delCC(${c.id})`)}</td></tr>`).join('')}</table>
       <p class="mut sm-t" style="margin-top:8px">Cada obra = um centro de custo.</p></div>
   </div>
   <div class="panel" style="margin-top:18px">
@@ -2781,11 +2815,11 @@ function vFavs(){
   <div class="flt">
     <label>Buscar<input id="fv-q" value="${esc(FVF.q)}" placeholder="nome, documento, e-mail, telefone..." style="width:240px"></label>
     <label>Tipo<select id="fv-tipo"><option value="">Todos</option>${FAV_TIPOS.map(t=>`<option ${FVF.tipo===t?'selected':''}>${t}</option>`).join('')}</select></label>
-    <button id="fv-novo">+ Novo favorecido</button>
-    <button class="sec" id="fv-imp">📥 Importar planilha</button>
+    ${podeEditar()?`<button id="fv-novo">+ Novo favorecido</button>
+    <button class="sec" id="fv-imp">📥 Importar planilha</button>`:'<span class="badge b-mut" style="align-self:flex-end;margin-bottom:6px">🔒 somente leitura</span>'}
     <button class="sec" id="fv-mod">📄 Baixar modelo</button>
     <button class="sec" id="fv-exp">Exportar CSV</button>
-    <button class="sec" id="fv-cols">⚙️ Colunas extras</button>
+    ${podeEditar()?'<button class="sec" id="fv-cols">⚙️ Colunas extras</button>':''}
     <span class="mut sm-t" style="align-self:flex-end;padding-bottom:6px">${L.length} de ${favs().length} favorecidos</span>
   </div>
   <input type="file" id="fv-file" accept=".xlsx,.xls,.csv" style="display:none">
@@ -2804,14 +2838,15 @@ function vFavs(){
       <td class="sm-t mut">${f.cc?esc(ccN(f.cc)):'—'}</td>
       ${cols.map((c,i)=>c.show?`<td class="sm-t">${esc(f['x'+(i+1)]||'—')}</td>`:'').join('')}
       <td class="r">${usoFav(f)}</td>
-      <td style="white-space:nowrap"><button class="sm sec" data-fed="${esc(f.id)}">✏️</button> <button class="sm sec" data-fdel="${esc(f.id)}">🗑️</button></td>
+      <td style="white-space:nowrap">${podeEditar()?`<button class="sm sec" data-fed="${esc(f.id)}">✏️</button> <button class="sm sec" data-fdel="${esc(f.id)}">🗑️</button>`:''}</td>
     </tr>`).join('')
-    :`<tr><td colspan="${nCols}" class="mut" style="text-align:center;padding:20px">${favs().length?'Nenhum favorecido encontrado com esse filtro.':'Nenhum favorecido cadastrado. Use <b>+ Novo favorecido</b> ou <b>📥 Importar planilha</b>.'}</td></tr>`}
+    :`<tr><td colspan="${nCols}" class="mut" style="text-align:center;padding:20px">${favs().length?'Nenhum favorecido encontrado com esse filtro.':(podeEditar()?'Nenhum favorecido cadastrado. Use <b>+ Novo favorecido</b> ou <b>📥 Importar planilha</b>.':'Nenhum favorecido cadastrado.')}</td></tr>`}
   </table></div>`;
 }
 
 /* ── Modal: configurar as 3 colunas coringa ──────────────────────── */
 function cfgFavCols(){
+  if(!podeEditar()) return bloqueado();
   const cols = favCols();
   openModal(`<h3>⚙️ Colunas extras do cadastro</h3>
   <p class="sm-t mut">Renomeie as três colunas livres conforme sua necessidade (ex.: "Banco", "Chave PIX", "Contato"). Marque para exibi-las na tabela e nos relatórios.</p>
@@ -2835,6 +2870,7 @@ function cfgFavCols(){
 
 /* ── Modal: criar / editar favorecido ────────────────────────────── */
 window.cadFav = function(id){
+  if(!podeEditar()) return bloqueado();
   const f = id ? favs().find(x=>String(x.id)===String(id)) : null;
   if(id && !f) return toast('Favorecido não encontrado.');
   const cols = favCols();
@@ -2868,6 +2904,7 @@ window.cadFav = function(id){
   };
 };
 window.delFav = function(id){
+  if(!podeEditar()) return bloqueado();
   const f = favs().find(x=>String(x.id)===String(id));
   if(!f) return;
   const n = usoFav(f);
@@ -2971,6 +3008,7 @@ async function lerArquivoFav(file){
 
 /* ── Importação com prévia ───────────────────────────────────────── */
 async function importarFav(file){
+  if(!podeEditar()) return bloqueado();
   let rows;
   try{ rows = await lerArquivoFav(file); }
   catch(e){ return alert('Não foi possível ler o arquivo.\n\n'+e.message+'\n\nDica: salve a planilha como CSV e tente de novo.'); }
@@ -3037,16 +3075,19 @@ function bindFavs(){
   if(q) q.oninput = e=>{ FVF.q=e.target.value; clearTimeout(window._fvq);
     window._fvq=setTimeout(()=>{ render(); const n=$('#fv-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); };
   const t = $('#fv-tipo'); if(t) t.onchange = e=>{ FVF.tipo=e.target.value; render(); };
-  $('#fv-novo').onclick = ()=>cadFav(null);
-  $('#fv-cols').onclick = ()=>cfgFavCols();
+  const bNovo = $('#fv-novo'); if(bNovo) bNovo.onclick = ()=>cadFav(null);
+  const bCols = $('#fv-cols'); if(bCols) bCols.onclick = ()=>cfgFavCols();
   $('#fv-mod').onclick  = ()=>baixarModeloFav();
   $('#fv-exp').onclick  = ()=>dl('favorecidos.csv', csvOut([favHeaders(), ...favFiltrados().map(favToRow)]), 'text/csv');
   const file = $('#fv-file');
-  $('#fv-imp').onclick = ()=>file.click();
-  file.onchange = async e=>{
-    const f = e.target.files[0]; e.target.value='';
-    if(f) await importarFav(f);
-  };
+  const bImp = $('#fv-imp');
+  if(bImp && file){
+    bImp.onclick = ()=>file.click();
+    file.onchange = async e=>{
+      const f = e.target.files[0]; e.target.value='';
+      if(f) await importarFav(f);
+    };
+  }
   document.querySelectorAll('[data-fsort]').forEach(el=>el.onclick=()=>{
     const c=el.dataset.fsort; FVF.sortDir=(FVF.sortCol===c?-FVF.sortDir:1); FVF.sortCol=c; render();
   });
@@ -3064,12 +3105,13 @@ function vAdm(){
     {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
     {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
     {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
-    {k:'saldos',l:'💰 Ver saldos das contas'}
+    {k:'saldos',l:'💰 Ver saldos das contas'},{k:'editar',l:'✏️ Criar, alterar e excluir dados'}
   ];
+  const ed = podeEditar();
   let body='';
   if(tab==='usuarios'){
     body=`<div class="toolbar">
-      <button id="usr-novo">+ Novo usuário</button>
+      ${ed?'<button id="usr-novo">+ Novo usuário</button>':'<span class="badge b-mut">🔒 somente leitura</span>'}
       <span class="mut sm-t">${ROOT.usuarios.length} usuário(s)</span>
     </div>
     <div class="panel"><table>
@@ -3083,16 +3125,16 @@ function vAdm(){
           <td><span class="badge" style="background:${esc(pf.cor||'#888')};color:#fff">${esc(pf.nome)}</span></td>
           <td style="font-size:12px">${emps}</td>
           <td class="sm-t mut">${u.lastLogin?fmtD(u.lastLogin.slice(0,10)):'-'}</td>
-          <td style="white-space:nowrap">
+          <td style="white-space:nowrap">${ed?`
             <button class="sm sec" data-usr-ed="${u.id}">✏️ Editar</button>
             <button class="sm sec" data-usr-perm="${u.id}" title="Permissões">🔑</button>
-            <button class="sm sec" data-usr-del="${u.id}">🗑️</button>
+            <button class="sm sec" data-usr-del="${u.id}">🗑️</button>`:''}
           </td></tr>`;
       }).join('')}
     </table></div>`;
   } else if(tab==='perfis'){
     body=`<div class="toolbar">
-      <button id="pf-novo">+ Novo perfil</button>
+      ${ed?'<button id="pf-novo">+ Novo perfil</button>':'<span class="badge b-mut">🔒 somente leitura</span>'}
       <span class="mut sm-t">${(ROOT.perfis||[]).length} perfil(is)</span>
     </div>
     ${(ROOT.perfis||[]).map(pf=>`
@@ -3103,8 +3145,8 @@ function vAdm(){
         <span class="mut sm-t">${esc(pf.desc||'')}</span>
         <span class="badge b-mut sm-t">${ROOT.usuarios.filter(u=>(u.perfilId||2)===pf.id).length} usuário(s)</span>
         <div style="margin-left:auto;display:flex;gap:6px">
-          <button class="sm sec" data-pf-ed="${pf.id}">✏️ Editar</button>
-          ${pf.id>1?`<button class="sm sec" data-pf-del="${pf.id}">🗑️</button>`:''}
+          ${ed?`<button class="sm sec" data-pf-ed="${pf.id}">✏️ Editar</button>
+          ${pf.id>1?`<button class="sm sec" data-pf-del="${pf.id}">🗑️</button>`:''}`:''}
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px">
@@ -3118,7 +3160,7 @@ function vAdm(){
     </div>`).join('')}`;
   } else {
     body=`<div class="toolbar">
-      <button onclick="cadEmp(null)">+ Nova empresa</button>
+      ${ed?'<button onclick="cadEmp(null)">+ Nova empresa</button>':'<span class="badge b-mut">🔒 somente leitura</span>'}
     </div>
     <div class="panel"><table>
       <tr><th>Nome</th><th>Tema</th><th>CNPJ</th><th class="r">Lançamentos</th><th class="r">Contas</th><th>Usuários</th><th></th></tr>
@@ -3134,8 +3176,8 @@ function vAdm(){
           <td class="sm-t">${usrs.length} usuário(s)</td>
           <td style="white-space:nowrap">
             ${e.id!==ROOT.empAtual?`<button class="sm" onclick="setEmp(${e.id});save();refreshSide();render()">Abrir</button> `:''}
-            <button class="sm sec" onclick="cadEmp(${e.id})">✏️</button>
-            <button class="sm sec" onclick="delEmp(${e.id})">🗑️</button>
+            ${ed?`<button class="sm sec" onclick="cadEmp(${e.id})">✏️</button>
+            <button class="sm sec" onclick="delEmp(${e.id})">🗑️</button>`:''}
           </td></tr>`;
       }).join('')}
     </table></div>`;
@@ -3146,7 +3188,7 @@ function vAdm(){
   </div>
   ${body}`;
 }
-window.cadEmp = id => { const e = id?ROOT.empresas.find(x=>x.id===id):null;
+window.cadEmp = id => { if(!podeEditar()) return bloqueado(); const e = id?ROOT.empresas.find(x=>x.id===id):null;
   openModal(`<h3>${id?'Editar':'Nova'} empresa</h3><div class="fgrid">
     <label class="full">Nome<input id="e-n" value="${esc(e?e.nome:'')}" placeholder="Razão social ou apelido"></label>
     <label class="full">CNPJ (opcional)<input id="e-cj" value="${esc(e&&e.cnpj?e.cnpj:'')}" placeholder="00.000.000/0000-00"></label>
@@ -3190,6 +3232,7 @@ window.cadEmp = id => { const e = id?ROOT.empresas.find(x=>x.id===id):null;
     save(); refreshSide(); closeModal(); render(); };
 };
 window.delEmp = id => {
+  if(!podeEditar()) return bloqueado();
   if(ROOT.empresas.length<2) return alert('É preciso manter ao menos uma empresa.');
   const e=ROOT.empresas.find(x=>x.id===id);
   if(confirm('Excluir a empresa "'+e.nome+'" e TODOS os seus '+e.db.lancs.length+' lançamentos? Esta ação não pode ser desfeita.')){
@@ -3197,7 +3240,7 @@ window.delEmp = id => {
     if(ROOT.empAtual===id) setEmp(ROOT.empresas[0].id);
     save(); refreshSide(); render(); }
 };
-window.cadUser = id => { const u = id?ROOT.usuarios.find(x=>x.id===id):null;
+window.cadUser = id => { if(!podeEditar()) return bloqueado(); const u = id?ROOT.usuarios.find(x=>x.id===id):null;
   openModal(`<h3 style="margin-bottom:4px">${id?'Editar':'Novo'} usuário</h3>
   <p class="mut sm-t" style="margin-bottom:14px">Configure acesso, perfil e empresas para este usuário.</p>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
@@ -3238,13 +3281,14 @@ window.cadUser = id => { const u = id?ROOT.usuarios.find(x=>x.id===id):null;
     save(); closeModal(); render(); };
 };
 window.delUser = id => {
+  if(!podeEditar()) return bloqueado();
   const u=ROOT.usuarios.find(x=>x.id===id);
   if(USER && USER.id===id) return alert('Você não pode excluir o usuário logado.');
   if(u.admin && ROOT.usuarios.filter(x=>x.admin).length<2) return alert('É preciso manter ao menos um administrador.');
   if(confirm('Excluir usuário "'+u.nome+'"?')){ ROOT.usuarios=ROOT.usuarios.filter(x=>x.id!==id); save(); render(); }
 };
 function nextCadId(list){ return list.reduce((m,x)=>Math.max(m,x.id),0)+1; }
-window.cadConta = id => { const c = id?conta(id):{nome:'',banco:'',saldoIni:0};
+window.cadConta = id => { if(!podeEditar()) return bloqueado(); const c = id?conta(id):{nome:'',banco:'',saldoIni:0};
   openModal(`<h3>${id?'Editar':'Nova'} conta</h3><div class="fgrid">
     <label>Nome<input id="c-n" value="${esc(c.nome)}"></label><label>Banco/descrição<input id="c-b" value="${esc(c.banco||'')}"></label>
     ${verSaldos()?`<label>Saldo inicial (R$)<input type="number" step="0.01" id="c-s" value="${c.saldoIni||0}"></label>`:''}</div>
@@ -3254,9 +3298,9 @@ window.cadConta = id => { const c = id?conta(id):{nome:'',banco:'',saldoIni:0};
     if(id) Object.assign(c,{nome:n,banco:$('#c-b').value.trim(),saldoIni:si});
     else DB.contas.push({id:nextCadId(DB.contas),nome:n,banco:$('#c-b').value.trim(),saldoIni:si});
     save(); closeModal(); render(); }; };
-window.delConta = id => { if(usoConta(id)) return alert('Conta possui '+usoConta(id)+' lançamentos. Transfira-os antes de excluir.');
+window.delConta = id => { if(!podeEditar()) return bloqueado(); if(usoConta(id)) return alert('Conta possui '+usoConta(id)+' lançamentos. Transfira-os antes de excluir.');
   if(confirm('Excluir conta?')){ DB.contas=DB.contas.filter(c=>c.id!==id); save(); render(); } };
-window.cadPlano = id => { const p = id?plano(id):{nome:'',tipo:'D'};
+window.cadPlano = id => { if(!podeEditar()) return bloqueado(); const p = id?plano(id):{nome:'',tipo:'D'};
   openModal(`<h3>${id?'Editar':'Novo'} plano de conta</h3><div class="fgrid">
     <label>Nome<input id="p-n" value="${esc(p.nome)}" placeholder="GRUPO:Subconta"></label>
     <label>Tipo<select id="p-t"><option value="D" ${p.tipo==='D'?'selected':''}>Despesa</option><option value="R" ${p.tipo==='R'?'selected':''}>Receita</option><option value="T" ${p.tipo==='T'?'selected':''}>Transferência</option><option value="A" ${p.tipo==='A'?'selected':''}>Misto</option></select></label></div>
@@ -3264,16 +3308,16 @@ window.cadPlano = id => { const p = id?plano(id):{nome:'',tipo:'D'};
   $('#p-ok').onclick=()=>{ const n=$('#p-n').value.trim(); if(!n) return alert('Informe o nome.');
     if(id) Object.assign(p,{nome:n,tipo:$('#p-t').value}); else DB.planos.push({id:nextCadId(DB.planos),nome:n,tipo:$('#p-t').value});
     DB.planos.sort(planoSort); save(); closeModal(); render(); }; };
-window.delPlano = id => { if(usoPlano(id)) return alert('Plano possui '+usoPlano(id)+' lançamentos.');
+window.delPlano = id => { if(!podeEditar()) return bloqueado(); if(usoPlano(id)) return alert('Plano possui '+usoPlano(id)+' lançamentos.');
   if(confirm('Excluir plano de conta?')){ DB.planos=DB.planos.filter(p=>p.id!==id); save(); render(); } };
-window.cadCC = id => { const c = id?cc(id):{nome:''};
+window.cadCC = id => { if(!podeEditar()) return bloqueado(); const c = id?cc(id):{nome:''};
   openModal(`<h3>${id?'Editar':'Novo'} centro de custo</h3><div class="fgrid">
     <label class="full">Nome<input id="cc-n" value="${esc(c.nome)}" placeholder="Nome da obra / setor"></label></div>
     <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="cc-ok">Salvar</button></div>`);
   $('#cc-ok').onclick=()=>{ const n=$('#cc-n').value.trim(); if(!n) return alert('Informe o nome.');
     if(id) Object.assign(c,{nome:n}); else DB.ccustos.push({id:nextCadId(DB.ccustos),nome:n});
     DB.ccustos.sort((a,b)=>a.nome.localeCompare(b.nome)); save(); closeModal(); render(); }; };
-window.delCC = id => { if(usoCC(id)) return alert('Centro de custo possui '+usoCC(id)+' lançamentos.');
+window.delCC = id => { if(!podeEditar()) return bloqueado(); if(usoCC(id)) return alert('Centro de custo possui '+usoCC(id)+' lançamentos.');
   if(confirm('Excluir centro de custo?')){ DB.ccustos=DB.ccustos.filter(c=>c.id!==id); save(); render(); } };
 
 /* ============ BACKUP AUTOMÁTICO ============ */
@@ -3524,6 +3568,7 @@ REGRAS:
 
     const stApply = $('#st-apply');
     if(stApply) stApply.onclick = ()=>{
+      if(!podeEditar()) return bloqueado();
       if(!STRUCT_PREVIEW) return;
       const emp = ROOT.empresas.find(e=>e.id===STRUCT_PREVIEW.empId);
       if(!emp){ toast('Empresa não encontrada.'); return; }
@@ -3571,9 +3616,9 @@ function vBkp(){
     <p style="margin-bottom:12px">Os dados ficam salvos <b>neste navegador, neste computador</b> — ${ROOT.empresas.length} empresa(s), ${DB.lancs.length} lançamentos na empresa atual (${esc(empAtual().nome)}), ~${sz} KB. O backup inclui <b>todas as empresas e usuários</b>. Se limpar o histórico/dados do navegador, os dados são perdidos — <b>exporte backups regularmente</b>.</p>
     <div class="toolbar">
       <button id="bk-exp">⬇️ Exportar backup (JSON)</button>
-      <label style="display:inline-block"><span class="sec" style="padding:8px 14px;border-radius:6px;background:#e2e8f0;cursor:pointer;display:inline-block">⬆️ Restaurar backup<input type="file" id="bk-imp" accept=".json" style="display:none"></span></label>
+      ${podeEditar()?`<label style="display:inline-block"><span class="sec" style="padding:8px 14px;border-radius:6px;background:#e2e8f0;cursor:pointer;display:inline-block">⬆️ Restaurar backup<input type="file" id="bk-imp" accept=".json" style="display:none"></span></label>`:''}
       <button class="sec" id="bk-csv">Exportar todos os lançamentos (CSV)</button>
-      <button class="bad" id="bk-reset">Restaurar base original (2126 conciliados)</button>
+      ${podeEditar()?`<button class="bad" id="bk-reset">Restaurar base original (2126 conciliados)</button>`:'<span class="badge b-mut">🔒 restauração indisponível em modo somente leitura</span>'}
     </div>
   </div>
   <div class="panel"><h3 style="margin-top:0">🔄 Backup automático em pasta</h3>
@@ -3605,7 +3650,8 @@ function bindBkp(){
     [...DB.lancs].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).forEach(l=>lparts(l).forEach(p=>rows.push([fmtD(l.data),TIPOS[l.tipo],l.fav,planoN(p.pl),ccN(p.cc),contaN(l.ct),l.hist+(p.d?' — '+p.d:''),nBR(p.v),l.fitid?'Sim':'Não',l.obs||''])));
     dl('lancamentos_completo.csv', csvOut(rows), 'text/csv');
   };
-  $('#bk-imp').onchange = e=>{
+  const bkImp = $('#bk-imp');
+  if(bkImp) bkImp.onchange = e=>{
     const f=e.target.files[0]; if(!f) return;
     const r=new FileReader();
     r.onload=()=>{ try{ const d=JSON.parse(r.result);
@@ -3617,12 +3663,14 @@ function bindBkp(){
       }catch(err){ alert('Arquivo inválido: '+err.message); } };
     r.readAsText(f);
   };
-  $('#bk-reset').onclick = ()=>{ if(confirm('Isto substitui os dados da empresa atual ('+empAtual().nome+') pela base original: 2126 lançamentos conciliados (CORA + Caixa + SICREDI). Continuar?')){ empAtual().db=JSON.parse(JSON.stringify(SEED)); setEmp(ROOT.empAtual); save(); render(); toast('Base original restaurada na empresa atual.'); } };
+  const bkRst = $('#bk-reset');
+  if(bkRst) bkRst.onclick = ()=>{ if(confirm('Isto substitui os dados da empresa atual ('+empAtual().nome+') pela base original: 2126 lançamentos conciliados (CORA + Caixa + SICREDI). Continuar?')){ empAtual().db=JSON.parse(JSON.stringify(SEED)); setEmp(ROOT.empAtual); save(); render(); toast('Base original restaurada na empresa atual.'); } };
   const bdir=$('#bk-dir'); if(bdir) bdir.onclick = bkChooseDir;
   const bnow=$('#bk-now'); if(bnow) bnow.onclick = ()=>autoBackup(true);
   const boff=$('#bk-off'); if(boff) boff.onclick = async ()=>{ if(confirm('Desativar o backup automático?')){ await bkhClear(); BKH=null; updateBkBar(); render(); } };
-  $('#ai-save').onclick = ()=>{ aiCfg().key=$('#ai-key').value.trim(); aiCfg().model=$('#ai-model').value; save(); toast('Configuração da IA salva.'); };
+  $('#ai-save').onclick = ()=>{ if(!podeEditar()) return bloqueado(); aiCfg().key=$('#ai-key').value.trim(); aiCfg().model=$('#ai-model').value; save(); toast('Configuração da IA salva.'); };
   $('#ai-test').onclick = async e=>{
+    if(!podeEditar()) return bloqueado();
     aiCfg().key=$('#ai-key').value.trim(); aiCfg().model=$('#ai-model').value; save();
     e.target.disabled=true; e.target.textContent='Testando...';
     try{ const r = await askClaude('Responda apenas: OK', [{role:'user',content:'teste'}], 16); toast('✓ Conexão com Claude funcionando ('+r.trim().slice(0,20)+')'); }
@@ -3640,11 +3688,12 @@ $('#modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeMo
 function ensurePerfis(r){
   if(!r.perfis||!r.perfis.length) r.perfis=[
     {id:1,nome:'Administrador',desc:'Acesso total ao sistema',cor:'#4a90d9',perms:{all:true}},
-    {id:2,nome:'Financeiro',desc:'Lançamentos, conciliação e relatórios',cor:'#27ae60',perms:{dash:true,lanc:true,conc:true,rel:true,grupo:true,ai:true,cad:true,favs:true,docs:true,cpr:true,emailcfg:true,bkp:true,contab:true,adm:false,saldos:true}},
-    {id:3,nome:'Contador',desc:'Somente relatórios e documentos',cor:'#8e44ad',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:true,ai:false,cad:false,favs:false,docs:true,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:true}},
-    {id:4,nome:'Visualização',desc:'Somente leitura do painel',cor:'#95a5a6',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false}},
-    {id:5,nome:'Operacional',desc:'Lança e consulta, mas não vê saldos das contas',cor:'#e67e22',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:true,docs:true,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false}},
-    {id:6,nome:'Contabilidade externa',desc:'Escritório terceirizado: baixa os pacotes mensais de documentos',cor:'#16a085',perms:{dash:false,lanc:false,conc:false,rel:false,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:false}}
+    {id:2,nome:'Financeiro',desc:'Lançamentos, conciliação e relatórios',cor:'#27ae60',perms:{dash:true,lanc:true,conc:true,rel:true,grupo:true,ai:true,cad:true,favs:true,docs:true,cpr:true,emailcfg:true,bkp:true,contab:true,adm:false,saldos:true,editar:true}},
+    {id:3,nome:'Contador',desc:'Somente relatórios e documentos',cor:'#8e44ad',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:true,ai:false,cad:false,favs:false,docs:true,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:true,editar:true}},
+    {id:4,nome:'Visualização',desc:'Somente leitura do painel',cor:'#95a5a6',perms:{dash:true,lanc:false,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false,editar:true}},
+    {id:5,nome:'Operacional',desc:'Lança e consulta, mas não vê saldos das contas',cor:'#e67e22',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:true,docs:true,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false,editar:true}},
+    {id:6,nome:'Contabilidade externa',desc:'Escritório terceirizado: baixa os pacotes mensais de documentos',cor:'#16a085',perms:{dash:false,lanc:false,conc:false,rel:false,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:false,editar:true}},
+    {id:7,nome:'Consulta',desc:'Vê painel, lançamentos, relatórios e assistente — não altera nada',cor:'#3498db',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:true,cad:false,favs:true,docs:false,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:true,editar:false}}
   ];
   // Migração: perfis salvos antes destes módulos herdam permissões equivalentes
   r.perfis.forEach(p=>{
@@ -3655,12 +3704,15 @@ function ensurePerfis(r){
     if(p.perms.favs   === undefined) p.perms.favs   = !!p.perms.cad;
     if(p.perms.saldos === undefined) p.perms.saldos = true;  // mantém o comportamento anterior
     if(p.perms.contab === undefined) p.perms.contab = !!p.perms.rel;
+    if(p.perms.editar === undefined) p.perms.editar = true;   // mantém o comportamento anterior
   });
   // Perfis que passam a existir também em instalações antigas
   if(!r.perfis.some(p=>p.id===5) && !r.perfis.some(p=>norm(p.nome)==='OPERACIONAL'))
-    r.perfis.push({id:5,nome:'Operacional',desc:'Lança e consulta, mas não vê saldos das contas',cor:'#e67e22',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:true,docs:true,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false}});
+    r.perfis.push({id:5,nome:'Operacional',desc:'Lança e consulta, mas não vê saldos das contas',cor:'#e67e22',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:false,cad:false,favs:true,docs:true,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:false,editar:true}});
   if(!r.perfis.some(p=>p.id===6) && !r.perfis.some(p=>norm(p.nome)==='CONTABILIDADE EXTERNA'))
-    r.perfis.push({id:6,nome:'Contabilidade externa',desc:'Escritório terceirizado: baixa os pacotes mensais de documentos',cor:'#16a085',perms:{dash:false,lanc:false,conc:false,rel:false,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:false}});
+    r.perfis.push({id:6,nome:'Contabilidade externa',desc:'Escritório terceirizado: baixa os pacotes mensais de documentos',cor:'#16a085',perms:{dash:false,lanc:false,conc:false,rel:false,grupo:false,ai:false,cad:false,favs:false,docs:false,cpr:false,emailcfg:false,bkp:false,contab:true,adm:false,saldos:false,editar:true}});
+  if(!r.perfis.some(p=>p.id===7) && !r.perfis.some(p=>norm(p.nome)==='CONSULTA'))
+    r.perfis.push({id:7,nome:'Consulta',desc:'Vê painel, lançamentos, relatórios e assistente — não altera nada',cor:'#3498db',perms:{dash:true,lanc:true,conc:false,rel:true,grupo:false,ai:true,cad:false,favs:true,docs:false,cpr:true,emailcfg:false,bkp:false,contab:false,adm:false,saldos:true,editar:false}});
   r.usuarios.forEach(u=>{ if(!u.perfilId) u.perfilId=u.admin?1:2; });
   return r;
 }
