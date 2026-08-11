@@ -1744,6 +1744,39 @@ function bindGrupo(){
 
 /* ============ LANÇAMENTOS ============ */
 let LF = { de:'', ate:'', ct:'', tipo:'', pl:'', cc:'', q:'', rec:'', lim:200, sortCol:'data', sortDir:-1 };
+
+/* ── Colunas livres do lançamento (3 campos com nome editável) ──────── */
+function lancCols(){
+  if(!Array.isArray(DB.lancCols) || DB.lancCols.length!==3)
+    DB.lancCols = [1,2,3].map(i=>({ nome:'Coluna '+i, show:false }));
+  return DB.lancCols;
+}
+function lancColName(i){ return (lancCols()[i].nome||'').trim() || ('Coluna '+(i+1)); }
+function lancColsAtivas(){ return lancCols().map((c,i)=>({...c, i})).filter(c=>c.show); }
+
+function cfgLancCols(){
+  if(!podeEditar()) return bloqueado();
+  const cols = lancCols();
+  openModal(`<h3>⚙️ Colunas extras do lançamento</h3>
+  <p class="sm-t mut">Três campos livres para o que o seu negócio precisar — número da nota, placa, contrato, obra, o que for. Renomeie e marque para exibir na tabela de lançamentos.</p>
+  <div style="margin:14px 0">
+    ${cols.map((c,i)=>`<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+      <input id="lc-n${i}" value="${esc(c.nome||'')}" placeholder="Coluna ${i+1}" style="flex:1">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--tx);white-space:nowrap">
+        <input type="checkbox" id="lc-s${i}" ${c.show?'checked':''} style="width:auto"> exibir na tabela
+      </label>
+    </div>`).join('')}
+  </div>
+  <p class="sm-t mut">Os valores já preenchidos não se perdem ao ocultar uma coluna — ela só deixa de aparecer na listagem.</p>
+  <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="lc-ok">Salvar</button></div>`);
+  $('#lc-ok').onclick = ()=>{
+    for(let i=0;i<3;i++){
+      cols[i].nome = $('#lc-n'+i).value.trim() || ('Coluna '+(i+1));
+      cols[i].show = $('#lc-s'+i).checked;
+    }
+    save(); closeModal(); render(); toast('Colunas atualizadas.');
+  };
+}
 let MODAL_DOCS = []; // docs buffer durante modal editLanc
 let CF = { status:'', pl:'', cc:'', ct:'', de:'', ate:'', q:'', lim:200 }; // filtros contas a pagar
 let DOCS_SESSION = []; // sessão de upload em lote
@@ -1782,7 +1815,7 @@ function filtLancs(){
     (!LF.ct || l.ct === +LF.ct) && (!LF.tipo || l.tipo === LF.tipo) &&
     (!LF.pl || lparts(l).some(p=>p.pl === +LF.pl)) && (!LF.cc || lparts(l).some(p=>p.cc === +LF.cc)) &&
     (!LF.rec || (LF.rec==='s') === !!l.fitid) &&
-    (!qn || norm(l.fav+' '+l.hist+' '+l.obs).includes(qn))
+    (!qn || norm([l.fav,l.hist,l.obs,l.x1,l.x2,l.x3].join(' ')).includes(qn))
   ).sort((a,b)=>{
     const d = LF.sortDir;
     switch(LF.sortCol){
@@ -1801,6 +1834,7 @@ function vLanc(){
   const rows = filtLancs();
   const tot = round2(rows.reduce((s,l)=>s+l.v,0));
   const shown = rows.slice(0, LF.lim);
+  const xCols = lancColsAtivas();
   return `<h2>Lançamentos</h2>
   <div class="flt">
     <label>De<input type="date" id="f-de" value="${LF.de}"></label>
@@ -1817,14 +1851,16 @@ function vLanc(){
   <div class="toolbar">
     ${podeEditar()?'<button id="b-novo">+ Novo lançamento</button>':'<span class="badge b-mut">🔒 somente leitura</span>'}
     <button class="sec" id="b-csv">Exportar CSV</button>
+    ${podeEditar()?'<button class="sec" id="b-cols">⚙️ Colunas extras</button>':''}
     <span class="mut sm-t">Exibindo <b>${shown.length}</b> de <b>${rows.length}</b> lançamentos — total: <b class="${tot<0?'neg':'pos'}">${fmt(tot)}</b></span>
   </div>
   <div class="panel"><table>
-    <tr>${[['data','Data'],['fav','Favorecido'],['pl','Plano de Conta'],['cc','Centro de Custo'],['hist','Histórico'],['ct','Conta'],['v','Valor']].map(([k,l])=>`<th class="sortable${k==='v'?' r':''}" data-sort="${k}" style="cursor:pointer;user-select:none">${l} ${LF.sortCol===k?(LF.sortDir===1?'↑':'↓'):'↕'}</th>`).join('')}<th></th></tr>
+    <tr>${[['data','Data'],['fav','Favorecido'],['pl','Plano de Conta'],['cc','Centro de Custo'],['hist','Histórico'],['ct','Conta'],['v','Valor']].map(([k,l])=>`<th class="sortable${k==='v'?' r':''}" data-sort="${k}" style="cursor:pointer;user-select:none">${l} ${LF.sortCol===k?(LF.sortDir===1?'↑':'↓'):'↕'}</th>`).join('')}${xCols.map(c=>`<th>${esc(lancColName(c.i))}</th>`).join('')}<th></th></tr>
     ${shown.map(l=>`<tr>
       <td>${fmtD(l.data)}</td><td>${esc(l.fav)}</td><td class="sm-t">${l.parts&&l.parts.length?`<span class="badge b-acc" title="${esc(splitTitle(l))}">rateado ×${l.parts.length}</span>`:esc(planoN(l.pl))}</td><td class="sm-t">${l.parts&&l.parts.length?'<span class="mut">vários</span>':esc(ccN(l.cc))}</td>
       <td class="hist" title="${esc(l.hist)}">${esc(l.hist)} ${l.fitid?'<span class="badge b-ok" title="Conciliado via OFX">✓</span>':'<span class="badge b-warn" title="Ainda não conciliado com extrato OFX">⏳</span>'}</td>
       <td class="sm-t">${esc(contaN(l.ct))}</td><td class="r ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td>
+      ${xCols.map(c=>`<td class="sm-t">${esc(l['x'+(c.i+1)]||'')}</td>`).join('')}
       <td style="white-space:nowrap">${podeEditar()?`<button class="sm sec" data-ed="${l.id}">✏️</button> <button class="sm sec" data-del="${l.id}">🗑️</button>`:''}${l.docs&&l.docs.length?` <span class="badge b-acc" title="${l.docs.length} doc(s) anexado(s)">📎 ${l.docs.length}</span>`:''}</td>
     </tr>`).join('')}
   </table>
@@ -1841,9 +1877,14 @@ function bindLanc(){
   $('#f-q').oninput = e=>{ LF.q=e.target.value; LF.lim=200; clearTimeout(window._qh); window._qh=setTimeout(re,300); };
   $('#f-clr').onclick = ()=>{ LF={de:'',ate:'',ct:'',tipo:'',pl:'',cc:'',q:'',rec:'',lim:200,sortCol:'data',sortDir:-1}; re(); };
   const bnv = $('#b-novo'); if(bnv) bnv.onclick = ()=>editLanc(null);
+  const bcl = $('#b-cols'); if(bcl) bcl.onclick = ()=>cfgLancCols();
   $('#b-csv').onclick = ()=>{
-    const rows = [['Data','Tipo','Favorecido','Plano de Conta','Centro de Custo','Conta','Histórico','Valor','Observações']];
-    filtLancs().forEach(l=>lparts(l).forEach(p=>rows.push([fmtD(l.data),TIPOS[l.tipo],l.fav,planoN(p.pl),ccN(p.cc),contaN(l.ct),l.hist+(p.d?' — '+p.d:''),nBR(p.v),l.obs||''])));
+    // As colunas extras entram no CSV com o nome que você deu a elas
+    const xc = lancCols().map((c,i)=>({ nome:lancColName(i), k:'x'+(i+1) }));
+    const rows = [['Data','Tipo','Favorecido','Plano de Conta','Centro de Custo','Conta','Histórico','Valor','Observações'].concat(xc.map(c=>c.nome))];
+    filtLancs().forEach(l=>lparts(l).forEach(p=>rows.push(
+      [fmtD(l.data),TIPOS[l.tipo],l.fav,planoN(p.pl),ccN(p.cc),contaN(l.ct),l.hist+(p.d?' — '+p.d:''),nBR(p.v),l.obs||'']
+        .concat(xc.map(c=>l[c.k]||'')))));
     dl('lancamentos.csv', csvOut(rows), 'text/csv');
   };
   const more = $('#b-more'); if(more) more.onclick = ()=>{ LF.lim+=300; render(); };
@@ -1877,6 +1918,7 @@ function editLanc(id, ofx){
     <label id="w-cc">Centro de custo<select id="m-cc">${selCC(l.cc, '— selecionar —', true)}</select></label>
     <label class="full">Histórico<input id="m-hist" value="${esc(l.hist)}"></label>
     <label class="full">Observações<input id="m-obs" value="${esc(l.obs||'')}"></label>
+    ${lancCols().map((c,i)=>`<label>${esc(lancColName(i))}<input id="m-x${i+1}" value="${esc(l['x'+(i+1)]||'')}"></label>`).join('')}
     <div class="full" style="margin-top:6px">
       <div style="font-size:11px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">📎 Documentos (notas fiscais, recibos)</div>
       <div id="m-docs-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:20px"></div>
@@ -1958,6 +2000,7 @@ function editLanc(id, ofx){
     const v = round2(Math.abs(parseFloat($('#m-v').value)||0) * dir);
     if(!$('#m-data').value || !v) return alert('Informe data e valor.');
     const o = { data:$('#m-data').value, tipo:$('#m-tipo').value, ct:+$('#m-ct').value, v, fav:$('#m-fav').value.trim(), hist:$('#m-hist').value.trim(), obs:$('#m-obs').value.trim() };
+    for(let i=1;i<=3;i++){ const el=$('#m-x'+i); if(el) o['x'+i]=el.value.trim(); }
     o.docs = MODAL_DOCS.slice();
     if($('#m-split').checked){
       const parts = P.filter(p=>p.v>0||p.pl||p.cc);
@@ -2639,7 +2682,8 @@ function gerarPacoteContab(){
   const empNome = safeNomeArq(emp.nome);
   const entries = [];
   const usados = new Set();
-  const indice = [['Arquivo','Pasta','Data','Tipo','Favorecido','CPF/CNPJ','Plano de Conta','Centro de Custo','Histórico','Conta','Valor','Observação']];
+  const xc = lancCols().map((c,i)=>({ nome:lancColName(i), k:'x'+(i+1) }));
+  const indice = [['Arquivo','Pasta','Data','Tipo','Favorecido','CPF/CNPJ','Plano de Conta','Centro de Custo','Histórico','Conta','Valor','Observação'].concat(xc.map(c=>c.nome))];
   let docCount = 0;
   const falhas = [];                 // anexos corrompidos que não entraram no ZIP
   const okIds  = new Set();          // lançamentos cujos documentos entraram de fato
@@ -2662,7 +2706,8 @@ function gerarPacoteContab(){
         for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
         entries.push({ name:`${pasta}/${nome}`, data:u8 });
         indice.push([nome, pasta, fmtD(l.data), l.v<0?'Despesa':'Receita', l.fav||'', docDoFav(l.fav),
-                     planoN(l.pl), ccN(l.cc), l.hist||'', contaN(l.ct)||'', nBR(l.v), l.obs||'']);
+                     planoN(l.pl), ccN(l.cc), l.hist||'', contaN(l.ct)||'', nBR(l.v), l.obs||'']
+                     .concat(xc.map(c=>l[c.k]||'')));
         docCount++; okIds.add(l.id);
       }catch(err){
         console.warn('Anexo ignorado:', nome, err);
@@ -2681,9 +2726,10 @@ function gerarPacoteContab(){
 
   const semDoc = L.filter(l=>nDocs(l)===0);
   if(semDoc.length){
-    const rows = [['Data','Tipo','Favorecido','CPF/CNPJ','Plano de Conta','Centro de Custo','Histórico','Conta','Valor','Observação']];
+    const rows = [['Data','Tipo','Favorecido','CPF/CNPJ','Plano de Conta','Centro de Custo','Histórico','Conta','Valor','Observação'].concat(xc.map(c=>c.nome))];
     semDoc.forEach(l=>rows.push([fmtD(l.data), l.v<0?'Despesa':'Receita', l.fav||'', docDoFav(l.fav),
-      planoN(l.pl), ccN(l.cc), l.hist||'', contaN(l.ct)||'', nBR(l.v), l.obs||'']));
+      planoN(l.pl), ccN(l.cc), l.hist||'', contaN(l.ct)||'', nBR(l.v), l.obs||'']
+      .concat(xc.map(c=>l[c.k]||''))));
     entries.push({ name:'PENDENTES-SEM-DOCUMENTO.csv', data: csvOut(rows) });
   }
 
