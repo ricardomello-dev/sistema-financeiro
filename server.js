@@ -427,6 +427,36 @@ app.get('/api/backup', exigeSessao, (req, res) => {
   res.send(JSON.stringify(semSegredos(root)));
 });
 
+// ── GET /api/backups — situação dos backups automáticos do servidor ──────
+app.get('/api/backups', exigeSessao, (req, res) => {
+  const root = lerRoot();
+  const eu = root && (root.usuarios || []).find(x => x.id === req.sessao.user_id);
+  if (!eu || !eu.admin) return res.status(403).json({ error: 'Restrito a administradores.' });
+
+  const base = '/var/backups/sistema-financeiro';
+  const ler = (sub) => {
+    try {
+      return fs.readdirSync(path.join(base, sub))
+        .filter(f => f.startsWith('sf_') && f.endsWith('.db.gz'))
+        .map(f => {
+          const st = fs.statSync(path.join(base, sub, f));
+          return { arquivo: f, data: f.slice(3, 13), tamanho: st.size, ts: st.mtimeMs };
+        })
+        .sort((a, b) => b.ts - a.ts);
+    } catch (e) { return []; }
+  };
+  const diarios = ler('diario'), mensais = ler('mensal');
+  res.json({
+    ok: true,
+    configurado: diarios.length > 0 || mensais.length > 0,
+    ultimo: diarios[0] || null,
+    diarios: diarios.slice(0, 30),
+    mensais,
+    total: diarios.length + mensais.length,
+    espaco: [...diarios, ...mensais].reduce((s, x) => s + x.tamanho, 0)
+  });
+});
+
 // ── Recuperação de senha ─────────────────────────────────────────────────
 // O hash é o mesmo do cliente: sha256(salt + '|' + senha), em UTF-8.
 function hashPw(pw, salt) {

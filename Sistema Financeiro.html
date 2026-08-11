@@ -3418,6 +3418,7 @@ async function bkhSet(h){ const d=await idbOpen(); await new Promise((res,rej)=>
 async function bkhGet(){ try{ const d=await idbOpen(); return await new Promise((res,rej)=>{ const q=d.transaction('h','readonly').objectStore('h').get('dir'); q.onsuccess=()=>res(q.result||null); q.onerror=()=>rej(q.error); }); }catch(e){ return null; } }
 async function bkhClear(){ try{ const d=await idbOpen(); d.transaction('h','readwrite').objectStore('h').delete('dir'); }catch(e){} }
 async function autoBackup(interactive){
+  if(API_MODE) return false;   // no servidor, quem faz backup é o backup.sh diário
   if(!BKH) { updateBkBar(); return false; }
   try{
     let p = await BKH.queryPermission({mode:'readwrite'});
@@ -3439,6 +3440,8 @@ async function autoBackup(interactive){
 function updateBkBar(){
   if(!ROOT) return;
   const bar = document.getElementById('bkbar'); if(!bar) return;
+  // No modo servidor a barra some: o backup é do servidor, não deste navegador.
+  if(API_MODE){ bar.style.display='none'; return; }
   (async()=>{
     if(BKH){
       let p = 'prompt';
@@ -3702,30 +3705,92 @@ function bindAI(){
 /* ============ BACKUP ============ */
 function vBkp(){
   const sz = (JSON.stringify(ROOT).length/1024).toFixed(0);
+  const nLan = ROOT.empresas.reduce((s,e)=>s+((e.db&&e.db.lancs)?e.db.lancs.length:0),0);
+
+  if(API_MODE) return `<h2>💾 Backup e dados</h2>
+  <div class="panel">
+    <h3 style="margin-top:0">Onde ficam os seus dados</h3>
+    <p style="margin-bottom:10px">No <b>servidor</b>, não neste computador. São ${ROOT.empresas.length} empresa(s) e ${nLan} lançamentos no total (~${sz} KB). Fechar o navegador, trocar de máquina ou limpar o histórico não afeta nada.</p>
+    <p class="sm-t mut">O servidor guarda uma cópia por dia, com histórico de 30 dias e uma cópia de cada mês. As cópias são verificadas antes de serem aceitas — um arquivo corrompido é recusado em vez de sobrescrever um backup bom.</p>
+  </div>
+
+  <div class="panel">
+    <h3 style="margin-top:0">📅 Cópias automáticas do servidor</h3>
+    <div id="bk-srv"><span class="mut sm-t">Consultando…</span></div>
+  </div>
+
+  <div class="panel">
+    <h3 style="margin-top:0">📥 Cópia manual</h3>
+    <p class="sm-t mut" style="margin-bottom:10px">Além do backup automático, você pode baixar uma cópia para guardar por conta própria. O arquivo JSON contém <b>todas as empresas</b> — trate como documento confidencial. Senhas não vão nele.</p>
+    <div class="toolbar">
+      <button id="bk-exp">⬇️ Baixar backup (JSON)</button>
+      <button class="sec" id="bk-csv">Baixar lançamentos da empresa atual (CSV)</button>
+      ${(podeEditar()&&ehAdmin())?`<label style="display:inline-block"><span class="sec" style="padding:8px 14px;border-radius:6px;background:#e2e8f0;cursor:pointer;display:inline-block">⬆️ Restaurar de um arquivo<input type="file" id="bk-imp" accept=".json" style="display:none"></span></label>`:''}
+    </div>
+    ${(podeEditar()&&ehAdmin())?'<p class="sm-t mut" style="margin-top:8px">⚠️ Restaurar substitui os dados atuais. Para voltar a um dia específico, prefira as cópias do servidor — peça ao responsável técnico rodar <code>restaurar.sh</code>, que faz a troca com verificação e guarda o estado anterior.</p>':''}
+  </div>`;
+
+  // ── Modo arquivo solto (sem servidor) ──
   return `<h2>Backup e dados</h2>
   <div class="panel">
-    <p style="margin-bottom:12px">Os dados ficam salvos <b>neste navegador, neste computador</b> — ${ROOT.empresas.length} empresa(s), ${DB.lancs.length} lançamentos na empresa atual (${esc(empAtual().nome)}), ~${sz} KB. O backup inclui <b>todas as empresas e usuários</b>. Se limpar o histórico/dados do navegador, os dados são perdidos — <b>exporte backups regularmente</b>.</p>
+    <p style="margin-bottom:12px">Os dados ficam salvos <b>neste navegador, neste computador</b> — ${ROOT.empresas.length} empresa(s), ${DB.lancs.length} lançamentos na empresa atual (${esc(empAtual().nome)}), ~${sz} KB. Se limpar o histórico/dados do navegador, os dados são perdidos — <b>exporte backups regularmente</b>.</p>
     <div class="toolbar">
       <button id="bk-exp">⬇️ Exportar backup (JSON)</button>
       ${podeEditar()?`<label style="display:inline-block"><span class="sec" style="padding:8px 14px;border-radius:6px;background:#e2e8f0;cursor:pointer;display:inline-block">⬆️ Restaurar backup<input type="file" id="bk-imp" accept=".json" style="display:none"></span></label>`:''}
       <button class="sec" id="bk-csv">Exportar todos os lançamentos (CSV)</button>
-      ${podeEditar()?`<button class="bad" id="bk-reset">Restaurar base original (2126 conciliados)</button>`:'<span class="badge b-mut">🔒 restauração indisponível em modo somente leitura</span>'}
     </div>
   </div>
   <div class="panel"><h3 style="margin-top:0">🔄 Backup automático em pasta</h3>
-    <p class="sm-t" style="margin-bottom:10px">${BKH?`<span class="badge b-ok">ATIVO</span> Salvando na pasta <b>${esc(BKH.name)}</b> — um arquivo por dia (backup_financeiro_AAAA-MM-DD.json), gravado automaticamente a cada alteração.`:`<span class="badge b-warn">INATIVO</span> Escolha uma pasta <b>sincronizada com a nuvem</b> (OneDrive, Google Drive, Dropbox): cada alteração gera um backup que sobe para a nuvem sozinho — proteção total contra defeito no computador.`}</p>
+    <p class="sm-t" style="margin-bottom:10px">${BKH?`<span class="badge b-ok">ATIVO</span> Salvando na pasta <b>${esc(BKH.name)}</b> — um arquivo por dia.`:`<span class="badge b-warn">INATIVO</span> Escolha uma pasta <b>sincronizada com a nuvem</b>: cada alteração gera um backup que sobe sozinho.`}</p>
     <div class="toolbar">
       ${BKH?`<button id="bk-now">Fazer backup agora</button><button class="sec" id="bk-dir">Trocar pasta</button><button class="bad" id="bk-off">Desativar</button>`:`<button id="bk-dir">📁 Escolher pasta de backup</button>`}
-      <span class="sm-t mut">${ROOT.lastBkp?'Último backup: '+new Date(ROOT.lastBkp).toLocaleString('pt-BR'):'Nenhum backup registrado.'}${fsaOK()?'':' (Recurso disponível no Chrome/Edge — no seu navegador, use a exportação manual acima.)'}</span>
+      <span class="sm-t mut">${ROOT.lastBkp?'Último backup: '+new Date(ROOT.lastBkp).toLocaleString('pt-BR'):'Nenhum backup registrado.'}${fsaOK()?'':' (Recurso do Chrome/Edge.)'}</span>
     </div>
-    <p class="sm-t mut">O navegador pode pedir autorização da pasta uma vez por sessão — a barra amarela no topo avisa quando precisar.</p>
-  </div>
-  <div class="panel"><h3 style="margin-top:0">🤖 Integração Claude (IA)</h3>
-    <p class="sm-t mut">A configuração da chave de API foi movida para <b>🤖 Assistente → ⚙️ Configuração</b>.</p>
   </div>`;
 }
+/* Mostra as cópias que o servidor realmente tem em disco */
+async function carregaBackupsServidor(){
+  const el = $('#bk-srv'); if(!el) return;
+  if(!ehAdmin()){ el.innerHTML = '<span class="mut sm-t">Apenas administradores veem o detalhe das cópias.</span>'; return; }
+  try{
+    const r = await fetch('/api/backups', FETCH_OPTS);
+    if(r.status===403){ el.innerHTML = '<span class="mut sm-t">Restrito a administradores.</span>'; return; }
+    if(!r.ok) throw new Error('erro '+r.status);
+    const d = await r.json();
+    if(!d.configurado){
+      el.innerHTML = `<div style="background:#fff5f5;border:1px solid #f5c6c6;border-radius:6px;padding:12px">
+        <b class="neg">Nenhuma cópia automática encontrada.</b>
+        <p class="sm-t mut" style="margin:6px 0 0">O agendamento ainda não rodou ou não foi configurado no servidor. Peça ao responsável técnico verificar o <code>backup.sh</code> e o agendamento diário.</p></div>`;
+      return;
+    }
+    const mb = b => (b/1024/1024).toFixed(1)+' MB';
+    const kb = b => b>1048576 ? mb(b) : (b/1024).toFixed(0)+' KB';
+    const ult = d.ultimo;
+    const diasAtras = ult ? Math.floor((Date.now()-ult.ts)/86400000) : null;
+    const alerta = diasAtras !== null && diasAtras > 2;
+    el.innerHTML = `
+      <div class="cards" style="margin-bottom:12px">
+        <div class="card"><div class="lb">Última cópia</div>
+          <div class="vl ${alerta?'neg':'pos'}" style="font-size:17px">${ult?fmtD(ult.data):'—'}</div>
+          <div class="sm-t mut" style="margin-top:2px">${diasAtras===0?'hoje':diasAtras===1?'ontem':diasAtras+' dias atrás'}${alerta?' ⚠️':' ✓'}</div></div>
+        <div class="card"><div class="lb">Cópias guardadas</div><div class="vl">${d.total}</div>
+          <div class="sm-t mut" style="margin-top:2px">${d.diarios.length} diárias · ${d.mensais.length} mensais</div></div>
+        <div class="card"><div class="lb">Espaço usado</div><div class="vl" style="font-size:17px">${kb(d.espaco)}</div></div>
+      </div>
+      ${alerta?`<div style="background:#fff5f5;border:1px solid #f5c6c6;border-radius:6px;padding:10px 12px;margin-bottom:12px">
+        <b class="neg">A última cópia tem ${diasAtras} dias.</b> <span class="sm-t">O agendamento diário pode ter parado — vale verificar.</span></div>`:''}
+      <table><tr><th>Data</th><th>Tipo</th><th class="r">Tamanho</th></tr>
+        ${d.diarios.slice(0,10).map(x=>`<tr><td>${fmtD(x.data)}</td><td><span class="badge b-mut">diária</span></td><td class="r sm-t">${kb(x.tamanho)}</td></tr>`).join('')}
+        ${d.mensais.slice(0,6).map(x=>`<tr><td>${fmtD(x.data)}</td><td><span class="badge b-acc">mensal</span></td><td class="r sm-t">${kb(x.tamanho)}</td></tr>`).join('')}
+      </table>
+      <p class="sm-t mut" style="margin-top:10px">Para voltar a uma dessas datas, o responsável técnico roda <code>bash /var/www/sistema-financeiro/restaurar.sh AAAA-MM-DD</code> no servidor.</p>`;
+  }catch(e){
+    el.innerHTML = '<span class="neg sm-t">Não foi possível consultar as cópias do servidor: '+esc(e.message)+'</span>';
+  }
+}
 function bindBkp(){
-  $('#bk-exp').onclick = ()=>{ dl('backup_financeiro_'+today()+'.json', JSON.stringify(ROOT), 'application/json'); ROOT.lastBkp=Date.now(); save(); updateBkBar(); toast('Backup exportado — guarde em nuvem ou pendrive.'); };
+  if(API_MODE) carregaBackupsServidor();
+  $('#bk-exp').onclick = ()=>{ dl('backup_financeiro_'+today()+'.json', JSON.stringify(ROOT), 'application/json'); ROOT.lastBkp=Date.now(); save(); updateBkBar(); toast('Backup exportado — guarde em local seguro.'); };
   $('#bk-csv').onclick = ()=>{
     const rows=[['Data','Tipo','Favorecido','Plano de Conta','Centro de Custo','Conta','Histórico','Valor','Conciliado','Observações']];
     [...DB.lancs].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).forEach(l=>lparts(l).forEach(p=>rows.push([fmtD(l.data),TIPOS[l.tipo],l.fav,planoN(p.pl),ccN(p.cc),contaN(l.ct),l.hist+(p.d?' — '+p.d:''),nBR(p.v),l.fitid?'Sim':'Não',l.obs||''])));
