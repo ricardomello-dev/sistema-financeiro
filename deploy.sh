@@ -19,7 +19,9 @@ catch(e){ console.log('   ERRO DE SINTAXE no HTML: '+e.message); process.exit(1)
 node --check server.js && echo "   server.js: sintaxe OK" || { echo ">>> ABORTADO: erro no server.js"; exit 1; }
 
 echo "== 4/6 Liberando a porta 3000 =="
-lsof -ti :3000 | xargs -r kill -9
+# ATENCAO: -sTCP:LISTEN e obrigatorio. Sem ele, o lsof tambem lista o Caddy
+# (que abre conexao de saida para a 3000) e o kill derruba o proxy junto.
+lsof -ti :3000 -sTCP:LISTEN | xargs -r kill -9
 sleep 2
 
 echo "== 5/6 Reiniciando o servidor =="

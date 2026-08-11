@@ -148,21 +148,25 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 /* ============ ESTADO ============ */
 const SEED = JSON.parse(document.getElementById('seed').textContent);
 const KEY = 'sfc_construtora_v6';
-// ── API config (preenchido automaticamente pelo servidor) ──────────────────
-const API_TOKEN = window._APP_TOKEN || '';  // injetado pelo server.js
-const API_MODE  = !!API_TOKEN;             // true quando rodando no servidor
+// ── Modo servidor: a marca abaixo é trocada por "true" pelo server.js ──────
+// A autenticação acontece no SERVIDOR. O navegador não guarda segredo nenhum:
+// a sessão vive em cookie httpOnly, inacessível a este JavaScript.
+const API_MODE = (window._SF_SERVER_FLAG === true);
+const FETCH_OPTS = { credentials: 'same-origin' };
 let USER = null;
 let ROOT = null;   // carregado async em bootAsync()
 let DB   = null;   // dados da empresa atual
 async function loadRoot(){
-  // Tenta carregar do servidor (modo multi-usuário)
+  // No modo servidor os dados só vêm com sessão válida
   if(API_MODE){
     try{
-      const r = await fetch('/api/load', { headers:{'x-app-token':API_TOKEN} });
+      const r = await fetch('/api/load', FETCH_OPTS);
+      if(r.status===401) return null;             // sem sessão: quem chamou mostra o login
       if(r.ok){ const d = await r.json(); if(d && d.empresas){ console.log('✅ Dados carregados do servidor'); return d; } }
-    }catch(e){ console.warn('Servidor indisponível, usando localStorage:', e); }
+    }catch(e){ console.warn('Servidor indisponível:', e); }
+    return null;
   }
-  // Fallback: localStorage
+  // Fallback: localStorage (apenas quando o arquivo roda solto, sem servidor)
   try{ const s = localStorage.getItem(KEY); if(s){ const d = JSON.parse(s); if(d && d.empresas) return d; } }catch(e){ console.warn(e); }
   try{ const s5 = localStorage.getItem('sfc_construtora_v5'); if(s5){ const d5 = JSON.parse(s5);
     if(d5 && d5.lancs) return { empresas:[{id:1, nome:'EMPRESA PRINCIPAL', db:d5}], usuarios:[], cfg:{ai:d5.ai||null}, empAtual:1, lastBkp:d5.lastBkp||null }; } }catch(e){}
@@ -207,22 +211,57 @@ function setEmp(id){
 // DB e ROOT.empAtual são inicializados em bootAsync() via setEmp()
 let saveWarned = false;
 function save(){
-  // Sempre salva no localStorage como fallback offline
-  try{ localStorage.setItem(KEY, JSON.stringify(ROOT)); }
-  catch(e){ if(!saveWarned){ alert('Não foi possível salvar ('+e.message+'). Exporte um backup!'); saveWarned = true; } }
+  // No modo servidor os dados financeiros NÃO ficam no localStorage do navegador:
+  // guardar cópia local em máquina compartilhada é vazamento na certa.
+  if(!API_MODE){
+    try{ localStorage.setItem(KEY, JSON.stringify(ROOT)); }
+    catch(e){ if(!saveWarned){ alert('Não foi possível salvar ('+e.message+'). Exporte um backup!'); saveWarned = true; } }
+  }
   IDX = null;
-  // Sincroniza com o servidor (debounced 1s para não sobrecarregar)
+  // Sincroniza com o servidor (agrupado em 1,2s para não sobrecarregar)
   if(API_MODE){
     clearTimeout(window._syncTimer);
     window._syncTimer = setTimeout(async ()=>{
       try{
-        const r = await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json','x-app-token':API_TOKEN},body:JSON.stringify(ROOT)});
-        if(r.ok){ syncStatus('ok'); } else { syncStatus('err'); }
+        const r = await fetch('/api/save', Object.assign({
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(ROOT)
+        }, FETCH_OPTS));
+        if(r.ok){ syncStatus('ok'); }
+        else if(r.status===401){ syncStatus('err'); sessaoExpirou(); }
+        else { syncStatus('err'); }
       }catch(e){ syncStatus('err'); console.warn('Sync erro:',e); }
     }, 1200);
     syncStatus('pending');
   }
   clearTimeout(window._abh); window._abh = setTimeout(()=>autoBackup(false), 4000);
+}
+/* Gravação local só existe fora do modo servidor. Em máquina compartilhada,
+   deixar o ROOT no localStorage é vazamento — ele carrega dados de todas as empresas. */
+function gravaLocal(){
+  if(API_MODE) return;
+  try{ localStorage.setItem(KEY, JSON.stringify(ROOT)); }catch(e){}
+}
+function sessaoExpirou(){
+  if(window._sessAviso) return; window._sessAviso = true;
+  alert('Sua sessão expirou por inatividade.\n\nEntre novamente para continuar. As alterações não salvas podem ter sido perdidas.');
+  location.reload();
+}
+/* Grava imediatamente e espera o servidor confirmar. Usado quando o próximo
+   passo depende de o dado já estar lá (ex.: definir a senha de um usuário novo). */
+async function saveNow(){
+  clearTimeout(window._syncTimer);
+  gravaLocal(); IDX = null;
+  if(!API_MODE) return true;
+  syncStatus('pending');
+  try{
+    const r = await fetch('/api/save', Object.assign({
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(ROOT)
+    }, FETCH_OPTS));
+    if(r.ok){ syncStatus('ok'); return true; }
+    if(r.status===401){ sessaoExpirou(); return false; }
+    const d = await r.json().catch(()=>({}));
+    syncStatus('err'); alert('Não foi possível salvar: '+(d.error||('erro '+r.status))); return false;
+  }catch(e){ syncStatus('err'); alert('Falha de conexão ao salvar.'); return false; }
 }
 /* ---- senha: SHA-256 puro (com salt) ---- */
 function sha256(str){
@@ -3285,7 +3324,7 @@ window.cadUser = id => { if(!podeEditar()) return bloqueado(); const u = id?ROOT
     </label>
   </div>
   <div class="right" style="margin-top:14px"><button class="sec" onclick="closeModal()">Cancelar</button><button id="u-ok">Salvar usuário</button></div>`);
-  $('#u-ok').onclick=()=>{
+  $('#u-ok').onclick=async ()=>{
     const n=$('#u-n').value.trim(), lg=$('#u-l').value.trim().toLowerCase(), pw=$('#u-p').value;
     const em=$('#u-em').value.trim().toLowerCase();
     if(!n||!lg) return alert('Informe nome e login.');
@@ -3297,15 +3336,39 @@ window.cadUser = id => { if(!podeEditar()) return bloqueado(); const u = id?ROOT
     const isAdmin=pf&&(pf.perms&&pf.perms.all);
     const empChecked=[...document.querySelectorAll('[data-emp]')].filter(x=>x.checked).map(x=>+x.dataset.emp);
     const empAccess=empChecked.length===ROOT.empresas.length?[]:empChecked;
+    const minSenha = API_MODE ? 6 : 4;
+    if(pw && pw.length < minSenha) return alert('A senha deve ter ao menos '+minSenha+' caracteres.');
+    if(!id && !pw) return alert('Informe a senha do novo usuário.');
+
+    let novoId = null;
     if(id){
       u.nome=n; u.login=lg; u.email=em; u.admin=!!isAdmin; u.perfilId=pfId; u.empresas=empAccess;
-      if(pw){ if(pw.length<4) return alert('A senha deve ter ao menos 4 caracteres.'); u.salt=rndSalt(); u.hash=hashPw(pw,u.salt); }
+      if(pw && !API_MODE){ u.salt=rndSalt(); u.hash=hashPw(pw,u.salt); }
       if(!ROOT.usuarios.some(x=>x.admin)){ u.admin=true; u.perfilId=1; alert('É preciso manter ao menos um administrador — perfil revertido.'); }
     } else {
+      novoId = ROOT.usuarios.reduce((m,x)=>Math.max(m,x.id),0)+1;
       const salt=rndSalt();
-      ROOT.usuarios.push({id:ROOT.usuarios.reduce((m,x)=>Math.max(m,x.id),0)+1, nome:n, login:lg, email:em, salt, hash:hashPw(pw,salt), admin:!!isAdmin, perfilId:pfId, empresas:empAccess, lastLogin:null});
+      // No modo servidor o hash abaixo é descartado: quem grava a senha é o /api/definir-senha
+      ROOT.usuarios.push({id:novoId, nome:n, login:lg, email:em, salt, hash:hashPw(pw,salt), admin:!!isAdmin, perfilId:pfId, empresas:empAccess, lastLogin:null});
     }
-    save(); closeModal(); render(); };
+    // Modo servidor: a senha nunca é calculada no navegador — vai em claro pelo HTTPS
+    // e o servidor aplica scrypt. Assim o cliente não decide o hash de ninguém.
+    if(API_MODE && pw){
+      const alvo = id || novoId;
+      if(!(await saveNow())) return;   // o usuário precisa existir antes de receber senha
+      try{
+        const rr = await fetch('/api/definir-senha', Object.assign({
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ userId: alvo, senha: pw })
+        }, FETCH_OPTS));
+        const dd = await rr.json().catch(()=>({}));
+        if(!rr.ok){ alert('Usuário salvo, mas a senha NÃO foi definida: '+(dd.error||'erro desconhecido')); }
+        else toast('Usuário e senha salvos.');
+      }catch(e){ alert('Usuário salvo, mas houve falha ao definir a senha.'); }
+    } else {
+      save();
+    }
+    closeModal(); render(); };
 };
 window.delUser = id => {
   if(!podeEditar()) return bloqueado();
@@ -3367,7 +3430,7 @@ async function autoBackup(interactive){
     const w = await fh.createWritable();
     await w.write(JSON.stringify(ROOT)); await w.close();
     ROOT.lastBkp = Date.now();
-    try{ localStorage.setItem(KEY, JSON.stringify(ROOT)); }catch(e){}
+    gravaLocal();
     updateBkBar();
     if(interactive) toast('✓ Backup salvo na pasta "'+BKH.name+'".');
     return true;
@@ -3832,14 +3895,44 @@ function showLogin(msg){
     ${msg?'<p class="neg sm-t" style="margin:6px 0 0">'+esc(msg)+'</p>':''}
     <button id="lg-ok" style="width:100%;margin-top:12px">Entrar</button>
     <p style="text-align:center;margin-top:12px"><a href="#" id="lg-esqueci" style="color:var(--acc);font-size:12.5px">Esqueci minha senha</a></p></div>`;
-  const go = ()=>{
-    const u = ROOT.usuarios.find(x=>x.login === $('#lg-u').value.trim().toLowerCase());
-    if(!u || u.hash !== hashPw($('#lg-p').value, u.salt)) return showLogin('Login ou senha incorretos.');
-    USER = u; try{ sessionStorage.setItem('sfc_user', u.id); }catch(e){} try{ u.lastLogin=new Date().toISOString(); }catch(_){}
-    // Tenant: ensure user lands on an empresa they have access to
+  const entrar = (u)=>{
+    USER = u;
     const _allowed = userEmps();
     if(_allowed.length && !_allowed.find(e=>e.id===ROOT.empAtual)) setEmp(_allowed[0].id);
     el.style.display = 'none'; refreshSide(); render();
+  };
+  const go = async ()=>{
+    const login = $('#lg-u').value.trim().toLowerCase();
+    const senha = $('#lg-p').value;
+    if(!login || !senha) return showLogin('Informe login e senha.');
+
+    if(!API_MODE){
+      // Modo arquivo solto (sem servidor): validação local, como antes
+      const u = ROOT.usuarios.find(x=>x.login === login);
+      if(!u || u.hash !== hashPw(senha, u.salt)) return showLogin('Login ou senha incorretos.');
+      try{ u.lastLogin = new Date().toISOString(); }catch(_){}
+      return entrar(u);
+    }
+
+    // Modo servidor: quem valida a senha é o servidor
+    const b = $('#lg-ok'); b.disabled = true; b.textContent = 'Entrando…';
+    try{
+      const r = await fetch('/api/login', Object.assign({
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ login, senha })
+      }, FETCH_OPTS));
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok) return showLogin(d.error || 'Login ou senha incorretos.');
+      // Recarrega a base já autenticado (o /api/load exige sessão)
+      const nr = await loadRoot();
+      if(!nr) return showLogin('Não foi possível carregar os dados. Tente novamente.');
+      ROOT = ensurePerfis(nr); setEmp(ROOT.empAtual);
+      const u = ROOT.usuarios.find(x=>x.id === d.id) || ROOT.usuarios.find(x=>x.login === login);
+      if(!u) return showLogin('Usuário não encontrado na base.');
+      entrar(u);
+    }catch(e){
+      showLogin('Falha de conexão com o servidor.');
+    }
   };
   $('#lg-ok').onclick = go;
   $('#lg-esqueci').onclick = e=>{ e.preventDefault(); showEsqueci($('#lg-u').value.trim()); };
@@ -3950,24 +4043,44 @@ function showSetup(){
     <div class="fgrid" style="grid-template-columns:1fr">
       <label>Seu nome<input id="st-n"></label>
       <label>Login<input id="st-l"></label>
-      <label>Senha<input type="password" id="st-p"></label>
+      <label>E-mail (para recuperar a senha)<input type="email" id="st-em"></label>
+      <label>Senha<input type="password" id="st-p" placeholder="mínimo 6 caracteres"></label>
       <label>Confirmar senha<input type="password" id="st-p2"></label>
     </div>
-    <p class="mut sm-t" style="margin:8px 0 0">⚠️ Anote a senha em local seguro: não há recuperação automática.</p>
+    <p class="mut sm-t" style="margin:8px 0 0">⚠️ Anote a senha em local seguro.</p>
     <button id="st-ok" style="width:100%;margin-top:12px">Criar e entrar</button></div>`;
-  $('#st-ok').onclick = ()=>{
-    const n=$('#st-n').value.trim(), lg=$('#st-l').value.trim().toLowerCase(), p=$('#st-p').value;
+  $('#st-ok').onclick = async ()=>{
+    const n=$('#st-n').value.trim(), lg=$('#st-l').value.trim().toLowerCase();
+    const em=$('#st-em').value.trim().toLowerCase(), p=$('#st-p').value;
     if(!n||!lg) return alert('Informe nome e login.');
-    if(p.length<4) return alert('A senha deve ter ao menos 4 caracteres.');
+    if(p.length<6) return alert('A senha deve ter ao menos 6 caracteres.');
     if(p!==$('#st-p2').value) return alert('As senhas não conferem.');
+
+    if(API_MODE){
+      const b=$('#st-ok'); b.disabled=true; b.textContent='Criando…';
+      try{
+        const r = await fetch('/api/setup-inicial', Object.assign({
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ nome:n, login:lg, email:em, senha:p })
+        }, FETCH_OPTS));
+        const d = await r.json().catch(()=>({}));
+        if(!r.ok){ alert(d.error||'Falha ao criar o administrador.'); b.disabled=false; b.textContent='Criar e entrar'; return; }
+        toast('Administrador criado. Entre com a senha que você definiu.');
+        return showLogin();
+      }catch(e){ alert('Falha de conexão com o servidor.'); b.disabled=false; b.textContent='Criar e entrar'; return; }
+    }
+
     const salt = rndSalt();
-    const u = {id:1, nome:n, login:lg, salt, hash:hashPw(p,salt), admin:true};
+    const u = {id:1, nome:n, login:lg, email:em, salt, hash:hashPw(p,salt), admin:true};
     ROOT.usuarios.push(u); save();
-    USER = u; try{ sessionStorage.setItem('sfc_user', u.id); }catch(e){} try{ u.lastLogin=new Date().toISOString(); }catch(_){}
+    USER = u; try{ u.lastLogin=new Date().toISOString(); }catch(_){}
     el.style.display = 'none'; refreshSide(); render(); toast('Usuário administrador criado.');
   };
 }
-function logout(){ try{ sessionStorage.removeItem('sfc_user'); }catch(e){} USER=null; showLogin(); }
+async function logout(){
+  if(API_MODE){ try{ await fetch('/api/logout', Object.assign({method:'POST'}, FETCH_OPTS)); }catch(e){} }
+  USER=null; location.reload();
+}
 function syncStatus(s){
   const b = document.getElementById('sync-badge');
   if(!b) return;
@@ -3980,6 +4093,16 @@ function boot(){
   const rt = new URLSearchParams(location.search).get('rt');
   if(rt){ showNovaSenha(rt); return; }
   if(!ROOT.usuarios.length){ showSetup(); return; }
+
+  if(API_MODE){
+    // Quem diz se a sessão vale é o servidor — o navegador não decide isso.
+    // Se chegamos aqui com dados carregados, /api/load já aceitou a sessão.
+    const sid = (window._SESSAO_UID|0);
+    const u = ROOT.usuarios.find(x=>x.id===sid);
+    if(u){ USER=u; $('#login').style.display='none'; refreshSide(); render(); }
+    else showLogin();
+    return;
+  }
   let sid = 0; try{ sid = +(sessionStorage.getItem('sfc_user')||0); }catch(e){}
   const u = ROOT.usuarios.find(x=>x.id===sid);
   if(u){ USER=u; $('#login').style.display='none'; refreshSide(); render(); }
@@ -4090,7 +4213,7 @@ function initAlianceBrasil(){
   ];
 
   if(!db.nextId || db.nextId < 7100) db.nextId = 7100;
-  try{ localStorage.setItem(KEY, JSON.stringify(ROOT)); }catch(e){}
+  gravaLocal();
   console.log('[APV] Aliance Brasil: plano de contas e centros de custo configurados.');
 }
 
@@ -4114,7 +4237,7 @@ function addConsultorias(){
       db.planos.push(n); added++;
     }
   });
-  if(added){ db.planos.sort(planoSort); localStorage.setItem(KEY, JSON.stringify(ROOT)); console.log('[APV] +'+added+' planos de consultoria adicionados.'); }
+  if(added){ db.planos.sort(planoSort); gravaLocal(); console.log('[APV] +'+added+' planos de consultoria adicionados.'); }
 }
 
 function addRastreamento(){
@@ -4162,7 +4285,7 @@ function addRastreamento(){
     db.ccustos.sort((a,b)=>a.nome.localeCompare(b.nome));
     added++;
   }
-  if(added){ db.planos.sort(planoSort); localStorage.setItem(KEY, JSON.stringify(ROOT)); console.log('[APV] +'+added+' itens de rastreamento adicionados.'); }
+  if(added){ db.planos.sort(planoSort); gravaLocal(); console.log('[APV] +'+added+' itens de rastreamento adicionados.'); }
 }
 
 function addCCAssociados(){
@@ -4180,7 +4303,7 @@ function addCCAssociados(){
       db.ccustos.push(n); added++;
     }
   });
-  if(added){ db.ccustos.sort((a,b)=>a.nome.localeCompare(b.nome)); localStorage.setItem(KEY, JSON.stringify(ROOT)); console.log('[APV] +'+added+' centros de custo de receita adicionados.'); }
+  if(added){ db.ccustos.sort((a,b)=>a.nome.localeCompare(b.nome)); gravaLocal(); console.log('[APV] +'+added+' centros de custo de receita adicionados.'); }
 }
 
 (function initJunho2026(){
@@ -4321,23 +4444,59 @@ function addCCAssociados(){
   for(const l of novos){
     if(!existingIds.has(l.id)){ db.lancamentos.push(l); added++; }
   }
-  if(added > 0) localStorage.setItem('sfc_construtora_v6', JSON.stringify(r));
+  if(added > 0 && !API_MODE) localStorage.setItem('sfc_construtora_v6', JSON.stringify(r));
   console.log('[initJunho2026] ' + added + ' lançamentos importados para Aliance Brasil');
 })();
 
 // ── Inicialização assíncrona (carrega dados do servidor antes de renderizar) ──
 async function bootAsync(){
   const loading = document.getElementById('loading-screen');
-  try{
-    ROOT = await loadRoot();
-    try{ ROOT = ensurePerfis(ROOT); }catch(e){ console.warn(e); }
+
+  // ── Modo servidor: nada é carregado antes de o servidor confirmar a sessão ──
+  if(API_MODE){
+    const rt = new URLSearchParams(location.search).get('rt');
+    let sessao = null;
+    try{
+      const r = await fetch('/api/me', FETCH_OPTS);
+      if(r.ok) sessao = await r.json();
+    }catch(e){ console.warn('Servidor indisponível:', e); }
+
+    if(!sessao){
+      // Sem sessão: só a casca da aplicação, sem dado financeiro algum
+      ROOT = { empresas:[{id:1, nome:'—', db:{contas:[],planos:[],ccustos:[],lancs:[],nextId:1,learn:[]}}],
+               usuarios:[], perfis:[], cfg:{ai:null}, empAtual:1, lastBkp:null };
+      setEmp(1);
+      if(loading) loading.style.display='none';
+      if(rt) return showNovaSenha(rt);
+      // Precisa saber se já existe algum administrador para decidir login x setup
+      let temUsuarios = true;
+      try{ const r2 = await fetch('/api/tem-usuarios', FETCH_OPTS); if(r2.ok) temUsuarios = (await r2.json()).tem; }catch(e){}
+      return temUsuarios ? showLogin() : showSetup();
+    }
+
+    window._SESSAO_UID = sessao.id;
+    const d = await loadRoot();
+    if(!d){ if(loading) loading.style.display='none'; return showLogin('Não foi possível carregar os dados.'); }
+    ROOT = ensurePerfis(d);
     setEmp(ROOT.empAtual);
-    // Migrações que dependem de ROOT já carregado
     try{ initAlianceBrasil(); }catch(e){ console.warn(e); }
     try{ addConsultorias(); }catch(e){ console.warn(e); }
     try{ addRastreamento(); }catch(e){ console.warn(e); }
     try{ addCCAssociados(); }catch(e){ console.warn(e); }
-    if(API_MODE) save(); // persiste migrações no servidor
+    save();
+    if(loading) loading.style.display='none';
+    return boot();
+  }
+
+  // ── Modo arquivo solto (sem servidor) ──
+  try{
+    ROOT = await loadRoot();
+    try{ ROOT = ensurePerfis(ROOT); }catch(e){ console.warn(e); }
+    setEmp(ROOT.empAtual);
+    try{ initAlianceBrasil(); }catch(e){ console.warn(e); }
+    try{ addConsultorias(); }catch(e){ console.warn(e); }
+    try{ addRastreamento(); }catch(e){ console.warn(e); }
+    try{ addCCAssociados(); }catch(e){ console.warn(e); }
   }catch(e){
     console.error('Erro ao carregar dados:', e);
     ROOT = { empresas:[{id:1, nome:'EMPRESA PRINCIPAL', db:JSON.parse(JSON.stringify(SEED))}], usuarios:[], cfg:{ai:null}, empAtual:1, lastBkp:null };
