@@ -68,27 +68,42 @@ find "$DEST/diario" -name 'sf_*.db.gz' -mtime +30 -delete
 ls -1t "$DEST/mensal"/sf_*.db.gz 2>/dev/null | tail -n +13 | xargs -r rm -f
 echo "Retencao aplicada: $(ls -1 "$DEST/diario" | wc -l) diarios, $(ls -1 "$DEST/mensal" 2>/dev/null | wc -l) mensais."
 
-# 5. Copia externa (opcional) — configure REMOTO no .env.backup
+# 5. Copia FORA do servidor — enviada por e-mail, criptografada.
+#    Sem isso, perder a VPS significa perder tudo: backup no mesmo disco
+#    protege contra apagar sem querer, nao contra perder a maquina.
 if [ -f "$APP_DIR/.env.backup" ]; then
   # shellcheck disable=SC1090
   . "$APP_DIR/.env.backup"
-  if [ -n "${BACKUP_PASS:-}" ] && [ -n "${RCLONE_REMOTO:-}" ]; then
-    CRIPTO="$TMP/sf_${HOJE}.db.gz.enc"
-    if openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
-         -in "$ARQ" -out "$CRIPTO" -pass pass:"$BACKUP_PASS"; then
-      if command -v rclone >/dev/null && rclone copy "$CRIPTO" "$RCLONE_REMOTO" 2>&1; then
-        echo "Copia externa enviada para $RCLONE_REMOTO (criptografada)."
+fi
+
+if [ -n "${BACKUP_PASS:-}" ]; then
+  CRIPTO="$TMP/sf_${HOJE}.db.gz.enc"
+  if openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+       -in "$ARQ" -out "$CRIPTO" -pass pass:"$BACKUP_PASS" 2>/dev/null; then
+
+    # 5a. Por e-mail (usa o SMTP ja configurado no .env)
+    if [ "${BACKUP_POR_EMAIL:-1}" = "1" ]; then
+      if node "$APP_DIR/enviar-backup.js" "$CRIPTO"; then
+        echo "Copia externa enviada por e-mail (criptografada)."
       else
-        echo "AVISO: falha ao enviar a copia externa."
+        echo "AVISO: falha ao enviar a copia por e-mail."
       fi
-    else
-      echo "AVISO: falha ao criptografar a copia externa."
+    fi
+
+    # 5b. Para uma nuvem via rclone (opcional)
+    if [ -n "${RCLONE_REMOTO:-}" ] && command -v rclone >/dev/null; then
+      if rclone copy "$CRIPTO" "$RCLONE_REMOTO" 2>&1; then
+        echo "Copia externa enviada para $RCLONE_REMOTO."
+      else
+        echo "AVISO: falha ao enviar para $RCLONE_REMOTO."
+      fi
     fi
   else
-    echo "Copia externa nao configurada (.env.backup sem BACKUP_PASS/RCLONE_REMOTO)."
+    echo "AVISO: falha ao criptografar a copia externa."
   fi
 else
-  echo "Copia externa nao configurada (sem .env.backup)."
+  echo "Copia externa NAO configurada — o backup existe so neste servidor."
+  echo "  Configure em $APP_DIR/.env.backup (BACKUP_PASS)."
 fi
 
 echo "[$(date '+%F %T')] Backup concluido com sucesso."
