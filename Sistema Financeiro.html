@@ -3303,27 +3303,27 @@ window.delEmp = id => {
 window.cadUser = id => { if(!podeEditar()) return bloqueado(); const u = id?ROOT.usuarios.find(x=>x.id===id):null;
   openModal(`<h3 style="margin-bottom:4px">${id?'Editar':'Novo'} usuário</h3>
   <p class="mut sm-t" style="margin-bottom:14px">Configure acesso, perfil e empresas para este usuário.</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
-    <label class="full" style="grid-column:1/3">Nome completo<input id="u-n" value="${esc(u?u.nome:'')}" placeholder="Nome do usuário"></label>
-    <label>Login (e-mail ou apelido)<input id="u-l" value="${esc(u?u.login:'')}" placeholder="usuario@empresa.com"></label>
-    <label>${id?'Nova senha (vazio = manter)':'Senha'}<input type="password" id="u-p" placeholder="${id?'deixar vazio para manter':'mínimo 4 caracteres'}"></label>
-    <label class="full" style="grid-column:1/3">E-mail para recuperação de senha
+  <div class="fgrid">
+    <label class="full">Nome completo<input id="u-n" value="${esc(u?u.nome:'')}" placeholder="Nome do usuário"></label>
+    <label>Login<input id="u-l" value="${esc(u?u.login:'')}" placeholder="apelido ou e-mail"></label>
+    <label>${id?'Nova senha':'Senha'}<input type="password" id="u-p" autocomplete="new-password" placeholder="${id?'vazio = manter a atual':'mínimo 6 caracteres'}"></label>
+    <label class="full">E-mail para recuperação de senha
       <input type="email" id="u-em" value="${esc(u?(u.email||''):'')}" placeholder="nome@empresa.com.br">
-      <span class="mut sm-t">É para onde vai o link de "esqueci minha senha". Sem e-mail, só um administrador consegue redefinir a senha deste usuário.</span>
+      <span class="mut sm-t">Destino do link de "esqueci minha senha". Sem e-mail cadastrado, só um administrador redefine a senha deste usuário.</span>
     </label>
-    <label>Perfil de acesso
+    <label class="full">Perfil de acesso
       <select id="u-pf">
-        ${(ROOT.perfis||[]).map(pf=>`<option value="${pf.id}" ${(u?u.perfilId||2:2)===pf.id?'selected':''}>${esc(pf.nome)} — ${esc(pf.desc||'')}</option>`).join('')}
+        ${(ROOT.perfis||[]).map(pf=>`<option value="${pf.id}" ${(u?u.perfilId||2:2)===pf.id?'selected':''}>${esc(pf.nome)}${pf.desc?' — '+esc(pf.desc):''}</option>`).join('')}
       </select>
     </label>
-    <label style="flex-direction:column">Empresas com acesso
-      <div style="display:flex;flex-direction:column;gap:5px;margin-top:5px;max-height:120px;overflow-y:auto;border:1px solid var(--bd);border-radius:5px;padding:7px">
-        ${ROOT.empresas.map(e=>`<label style="flex-direction:row;align-items:center;gap:6px;font-weight:normal"><input type="checkbox" data-emp="${e.id}" ${(!u||!u.empresas||u.empresas.length===0||u.empresas.includes(e.id))?'checked':''} style="width:auto"> ${esc(e.nome)}</label>`).join('')}
+    <label class="full">Empresas com acesso
+      <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;max-height:130px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;padding:8px 10px">
+        ${ROOT.empresas.map(e=>`<label style="flex-direction:row;align-items:center;gap:7px;font-size:13px;color:var(--tx);cursor:pointer"><input type="checkbox" data-emp="${e.id}" ${(!u||!u.empresas||u.empresas.length===0||u.empresas.includes(e.id))?'checked':''} style="width:auto;flex:none"> ${esc(e.nome)}</label>`).join('')}
       </div>
       <span class="mut sm-t">Marque todas para acesso irrestrito.</span>
     </label>
   </div>
-  <div class="right" style="margin-top:14px"><button class="sec" onclick="closeModal()">Cancelar</button><button id="u-ok">Salvar usuário</button></div>`);
+  <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="u-ok">Salvar usuário</button></div>`);
   $('#u-ok').onclick=async ()=>{
     const n=$('#u-n').value.trim(), lg=$('#u-l').value.trim().toLowerCase(), pw=$('#u-p').value;
     const em=$('#u-em').value.trim().toLowerCase();
