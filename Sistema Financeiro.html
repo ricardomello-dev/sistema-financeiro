@@ -1382,6 +1382,8 @@ function vDash(){
 
 /* ============ GRUPO DE EMPRESAS (visão consolidada) ============ */
 let GF = { gid:null, aba:'painel', de:'', ate:'', emp:'', q:'', lim:200, sortCol:'data', sortDir:-1 };
+let RETF = { soc:'', q:'', lim:200, pendLim:12 };
+let RET_PEND = [];
 let GRUPO_CSV = [];
 
 function grupos(){ if(!ROOT.grupos) ROOT.grupos = []; return ROOT.grupos; }
@@ -1450,7 +1452,7 @@ function vGrupo(){
     </div>`;
   }
   const emps = grupoEmpresas(g);
-  const abas = [['painel','📊 Painel'],['comp','⚖️ Comparativo'],['lanc','📒 Lançamentos'],['rel','📈 Relatórios']];
+  const abas = [['painel','📊 Painel'],['comp','⚖️ Comparativo'],['ret','💸 Retiradas'],['lanc','📒 Lançamentos'],['rel','📈 Relatórios']];
   return head + `
   <div class="flt">
     <label>Grupo<select id="g-sel">${gs.map(x=>`<option value="${x.id}" ${x.id===g.id?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></label>
@@ -1472,6 +1474,7 @@ function grupoBody(g){
   if(!emps.length) return `<div class="panel"><span class="mut">Este grupo não tem empresas às quais você tenha acesso.</span></div>`;
   if(GF.aba==='painel') return gPainel(g, emps);
   if(GF.aba==='comp')   return gComparativo(g, emps);
+  if(GF.aba==='ret')    return gRetiradas(g);
   if(GF.aba==='lanc')   return gLancamentos(g);
   return gRelatorios(g, emps);
 }
@@ -1668,6 +1671,327 @@ function gRelatorios(g, emps){
   </div>`;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   RETIRADAS DE SÓCIOS
+   Uma retirada pertence ao SÓCIO, não a quem recebeu o dinheiro.
+   O cônjuge é apenas uma forma de pagamento: o valor cai na conta do
+   sócio dele. Sem isso, o placar de equilíbrio mente — e é justamente
+   nessa diferença que nasce a discussão entre sócios.
+   ═════════════════════════════════════════════════════════════════ */
+function retCfg(g){
+  if(!g) return { socios:[], over:{} };
+  if(!g.ret) g.ret = { socios:[], over:{} };
+  if(!Array.isArray(g.ret.socios)) g.ret.socios = [];
+  if(!g.ret.over || typeof g.ret.over !== 'object') g.ret.over = {};
+  return g.ret;
+}
+/* Índice nome-normalizado → sócio. O favorecido do lançamento é texto
+   livre (l.fav), então o casamento é por nome; o CPF entra como reforço
+   quando a pessoa está no cadastro de favorecidos da empresa. */
+function retIndex(g){
+  const cfg = retCfg(g), porNome = new Map(), porDoc = new Map();
+  for(const s of cfg.socios)
+    for(const p of (s.pessoas||[])){
+      if(p.nome) porNome.set(norm(p.nome), { s, p });
+      const d = soDigitos(p.doc); if(d) porDoc.set(d, { s, p });
+    }
+  return { porNome, porDoc };
+}
+/* soDigitos() já existe no bloco de Favorecidos — não redeclarar aqui */
+function chaveOver(e, l){ return e.id + '|' + l.id; }
+
+/* Resolve um lançamento: devolve {s, p} do sócio dono, ou null.
+   Ordem: override manual > nome do favorecido > CPF do cadastro. */
+function retDe(g, e, l, ix){
+  const cfg = retCfg(g);
+  const ov = cfg.over[chaveOver(e, l)];
+  if(ov !== undefined){
+    if(!ov) return null;                       // marcado como "não é retirada"
+    const s = cfg.socios.find(x=>x.id===ov);
+    return s ? { s, p:{ nome:l.fav||'', rel:'socio' }, manual:true } : null;
+  }
+  if(!l.fav) return null;
+  const porNome = ix.porNome.get(norm(l.fav));
+  if(porNome) return porNome;
+  const f = (empDB(e).favorecidos||[]).find(x=>norm(x.nome)===norm(l.fav));
+  if(f){ const d = soDigitos(f.doc); if(d && ix.porDoc.has(d)) return ix.porDoc.get(d); }
+  return null;
+}
+/* Todas as retiradas do grupo no período, já atribuídas ao sócio.
+   Só saídas (v<0); o valor sai positivo para leitura. */
+function retLancs(g){
+  const ix = retIndex(g), out = [];
+  for(const e of grupoEmpresas(g)){
+    if(GF.emp && e.id !== +GF.emp) continue;
+    for(const l of empLancsPer(e)){
+      if(l.v >= 0) continue;
+      const r = retDe(g, e, l, ix);
+      if(!r) continue;
+      out.push({ l, e, s:r.s, p:r.p, manual:!!r.manual, v:round2(-l.v) });
+    }
+  }
+  return out;
+}
+
+/* ── Aba: Retiradas ──────────────────────────────────────────────── */
+function gRetiradas(g){
+  const cfg  = retCfg(g);
+  const emps = grupoEmpresas(g);
+  const gerir = podeEditar();
+  if(!cfg.socios.length) return `
+    <div class="panel">
+      <h3 style="margin-top:0">Controle de retiradas dos sócios</h3>
+      <p>Cadastre os sócios e, dentro de cada um, as pessoas que podem receber no lugar dele — cônjuge, por exemplo. A partir daí toda saída para qualquer uma dessas pessoas, em qualquer empresa do grupo, é somada na conta do sócio.</p>
+      <p class="sm-t mut">O nome cadastrado precisa bater com o favorecido usado nos lançamentos. Depois de criar o primeiro sócio, a tela mostra os favorecidos ainda sem vínculo para você ligar em dois cliques.</p>
+      ${gerir?`<button id="rs-novo">+ Cadastrar primeiro sócio</button>`:`<p class="sm-t mut">Seu perfil é somente leitura.</p>`}
+    </div>`;
+
+  const rows = retLancs(g);
+  const porSocio = new Map(cfg.socios.map(s=>[s.id, { s, tot:0, n:0, porEmp:{}, porMes:{} }]));
+  for(const r of rows){
+    const a = porSocio.get(r.s.id); if(!a) continue;
+    a.tot = round2(a.tot + r.v); a.n++;
+    a.porEmp[r.e.id] = round2((a.porEmp[r.e.id]||0) + r.v);
+    const m = (r.l.data||'').slice(0,7);
+    if(m) a.porMes[m] = round2((a.porMes[m]||0) + r.v);
+  }
+  const acum   = [...porSocio.values()];
+  const total  = round2(acum.reduce((s,x)=>s+x.tot,0));
+  const esper  = round2(total / (cfg.socios.length||1));   // participação igual: 1/3 para cada
+  const mxTot  = Math.max(1, ...acum.map(x=>x.tot));
+
+  /* Placar de equilíbrio — o número que evita discussão */
+  const placar = acum.map(x=>{
+    const dif = round2(x.tot - esper);
+    const cls = dif > 0.005 ? 'neg' : (dif < -0.005 ? 'pos' : 'mut');
+    const rot = dif > 0.005 ? 'adiantado' : (dif < -0.005 ? 'a receber' : 'em dia');
+    const pct = total ? Math.round(x.tot/total*100) : 0;
+    return `<div class="card">
+      <div class="lb">${esc(x.s.nome)}</div>
+      <div class="vl">${fmt(x.tot)}</div>
+      <div class="sm-t ${cls}" style="margin-top:4px"><b>${dif>0?'+':''}${fmt(dif)}</b> ${rot}</div>
+      <div class="sm-t mut">${pct}% do total · ${x.n} lançamento(s)</div>
+    </div>`;
+  }).join('');
+
+  /* Matriz empresa × sócio */
+  const matriz = emps.map(e=>{
+    const tl = round2(acum.reduce((s,x)=>s+(x.porEmp[e.id]||0),0));
+    return `<tr><td>${esc(e.nome)}</td>
+      ${acum.map(x=>`<td class="r">${x.porEmp[e.id]?fmt(x.porEmp[e.id]):'<span class="mut">—</span>'}</td>`).join('')}
+      <td class="r"><b>${fmt(tl)}</b></td></tr>`;
+  }).join('');
+
+  /* Evolução mensal */
+  const meses = [...new Set(rows.map(r=>(r.l.data||'').slice(0,7)).filter(Boolean))].sort();
+  const linhasMes = meses.map(m=>{
+    const tl = round2(acum.reduce((s,x)=>s+(x.porMes[m]||0),0));
+    return `<tr><td>${monthName(m)}</td>
+      ${acum.map(x=>`<td class="r">${x.porMes[m]?fmt(x.porMes[m]):'<span class="mut">—</span>'}</td>`).join('')}
+      <td class="r"><b>${fmt(tl)}</b></td></tr>`;
+  }).join('');
+
+  /* Favorecidos de saída ainda sem vínculo — o caminho de configuração */
+  const ix = retIndex(g), pend = {};
+  for(const e of emps){
+    if(GF.emp && e.id !== +GF.emp) continue;
+    for(const l of empLancsPer(e)){
+      if(l.v >= 0 || !l.fav) continue;
+      if(retDe(g, e, l, ix)) continue;
+      const k = norm(l.fav);
+      pend[k] = pend[k] || { nome:l.fav, tot:0, n:0, planos:{} };
+      pend[k].tot = round2(pend[k].tot - l.v); pend[k].n++;
+      const gp = grupoDe(nomeEm(e,'planos',l.pl));
+      if(gp) pend[k].planos[gp] = (pend[k].planos[gp]||0) + 1;
+    }
+  }
+  const pendTop = Object.values(pend).sort((a,b)=>b.tot-a.tot).slice(0, RETF.pendLim);
+  RET_PEND = pendTop;   // o bind precisa dos nomes na mesma ordem dos botões
+  const nPend   = Object.keys(pend).length;
+  const optSoc  = cfg.socios.map(s=>`<option value="${s.id}">${esc(s.nome)}</option>`).join('');
+
+  /* Extrato */
+  const qn = norm(RETF.q);
+  let ext = rows.filter(r=>!RETF.soc || r.s.id===+RETF.soc)
+                .filter(r=>!qn || norm((r.l.fav||'')+' '+(r.l.hist||'')).includes(qn));
+  ext.sort((a,b)=>(b.l.data||'').localeCompare(a.l.data||''));
+  const extShown = ext.slice(0, RETF.lim);
+  GRUPO_CSV = [['Data','Empresa','Favorecido','Relação','Sócio','Plano de conta','Histórico','Valor']];
+  ext.forEach(r=>GRUPO_CSV.push([fmtD(r.l.data), r.e.nome, r.l.fav||'',
+    r.p.rel==='conjuge'?'cônjuge':'sócio', r.s.nome, nomeEm(r.e,'planos',r.l.pl), r.l.hist||'', nBR(r.v)]));
+
+  return `
+  <div class="cards">${placar}</div>
+  <div class="panel" style="padding:10px 14px">
+    <span class="sm-t mut">Total retirado no período: <b>${fmt(total)}</b> — dividido igualmente entre ${cfg.socios.length} sócios dá <b>${fmt(esper)}</b> para cada.
+    Quem está acima disso já se adiantou; quem está abaixo tem valor a receber.</span>
+  </div>
+
+  <div class="flt">
+    <label>Empresa<select id="g-emp"><option value="">Todas do grupo</option>${emps.map(e=>`<option value="${e.id}" ${String(GF.emp)===String(e.id)?'selected':''}>${esc(e.nome)}</option>`).join('')}</select></label>
+    <label>Sócio<select id="rs-fsoc"><option value="">Todos</option>${cfg.socios.map(s=>`<option value="${s.id}" ${String(RETF.soc)===String(s.id)?'selected':''}>${esc(s.nome)}</option>`).join('')}</select></label>
+    <label>Buscar<input id="rs-q" value="${esc(RETF.q)}" placeholder="favorecido, histórico..."></label>
+    <button class="sec" id="rs-csv">Exportar CSV</button>
+    ${gerir?`<button class="sec" id="rs-ger">👥 Gerir sócios</button>`:''}
+  </div>
+
+  <div style="display:flex;gap:18px;flex-wrap:wrap">
+    <div class="panel" style="flex:1.1;min-width:340px"><h3 style="margin-top:0">Retiradas por empresa</h3>
+      ${emps.length?`<table>
+        <tr><th>Empresa</th>${acum.map(x=>`<th class="r">${esc(x.s.nome)}</th>`).join('')}<th class="r">Total</th></tr>
+        ${matriz}
+        <tr><td><b>Total</b></td>${acum.map(x=>`<td class="r"><b>${fmt(x.tot)}</b></td>`).join('')}<td class="r"><b>${fmt(total)}</b></td></tr>
+      </table>`:'<span class="mut">Sem empresas.</span>'}
+    </div>
+    <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Participação de cada sócio</h3>
+      ${acum.length?`<table><tr><th>Sócio</th><th style="width:40%"></th><th class="r">Total</th></tr>
+        ${acum.map(x=>`<tr><td>${esc(x.s.nome)}</td><td><div class="bar" style="width:${Math.round(x.tot/mxTot*100)}%"></div></td><td class="r">${fmt(x.tot)}</td></tr>`).join('')}
+      </table>`:''}
+    </div>
+  </div>
+
+  <div class="panel"><h3 style="margin-top:0">Evolução mês a mês</h3>
+    ${meses.length?`<table>
+      <tr><th>Mês</th>${acum.map(x=>`<th class="r">${esc(x.s.nome)}</th>`).join('')}<th class="r">Total</th></tr>
+      ${linhasMes}
+    </table>`:'<span class="mut">Sem retiradas no período.</span>'}
+  </div>
+
+  ${nPend?`<div class="panel">
+    <h3 style="margin-top:0">Favorecidos de saída ainda sem vínculo <span class="sm-t mut">(${nPend})</span></h3>
+    <p class="sm-t mut" style="margin-top:0">Se alguma dessas pessoas é sócio ou cônjuge de sócio, ligue aqui — todos os lançamentos dela passam a contar no placar.</p>
+    <table><tr><th>Favorecido</th><th class="r">Total de saídas</th><th class="r">Lanç.</th><th style="width:230px">Vincular a</th></tr>
+      ${pendTop.map((x,i)=>{
+        const gps = Object.entries(x.planos).sort((a,b)=>b[1]-a[1]).slice(0,2).map(([n])=>n);
+        const dica = gps.some(n=>/RETIRAD|SOCIO|SÓCIO|PRO.?LABORE|LUCRO|DISTRIBUI/i.test(n));
+        return `<tr>
+        <td>${esc(x.nome)}${gps.length?`<div class="sm-t ${dica?'neg':'mut'}">${dica?'↳ ':''}${esc(gps.join(' · '))}</div>`:''}</td>
+        <td class="r neg">${fmt(x.tot)}</td>
+        <td class="r sm-t">${x.n}</td>
+        <td>${gerir?`<div style="display:flex;gap:4px">
+          <select class="rs-psoc" data-i="${i}" style="flex:1"><option value="">— sócio —</option>${optSoc}</select>
+          <select class="rs-prel" data-i="${i}" style="width:96px"><option value="conjuge">cônjuge</option><option value="socio">o próprio</option></select>
+          <button class="sm" data-rsvinc="${i}">ok</button>
+        </div>`:'<span class="mut sm-t">somente leitura</span>'}</td></tr>`;}).join('')}
+    </table>
+    ${nPend>pendTop.length?`<div style="padding:10px;text-align:center"><button class="sec sm" id="rs-pmore">Mostrar mais (${nPend-pendTop.length} restantes)</button></div>`:''}
+  </div>`:''}
+
+  <div class="panel"><h3 style="margin-top:0">Extrato de retiradas <span class="sm-t mut">(${ext.length})</span></h3>
+    ${extShown.length?`<table>
+      <tr><th>Data</th><th>Empresa</th><th>Favorecido</th><th>Atribuído a</th><th>Plano de conta</th><th>Histórico</th><th class="r">Valor</th>${gerir?'<th></th>':''}</tr>
+      ${extShown.map(r=>`<tr>
+        <td>${fmtD(r.l.data)}</td>
+        <td class="sm-t"><span class="badge b-acc">${esc(r.e.nome)}</span></td>
+        <td>${esc(r.l.fav)}${r.p.rel==='conjuge'?' <span class="badge">cônjuge</span>':''}${r.manual?' <span class="badge">manual</span>':''}</td>
+        <td><b>${esc(r.s.nome)}</b></td>
+        <td class="sm-t">${esc(nomeEm(r.e,'planos',r.l.pl))}</td>
+        <td class="hist" title="${esc(r.l.hist)}">${esc(r.l.hist)}</td>
+        <td class="r neg">${fmt(r.v)}</td>
+        ${gerir?`<td class="r"><button class="sm sec" data-rsedit="${esc(chaveOver(r.e,r.l))}" title="Reatribuir ou tirar do placar">⋯</button></td>`:''}
+      </tr>`).join('')}
+    </table>
+    ${ext.length>extShown.length?`<div style="padding:12px;text-align:center"><button class="sec" id="rs-more">Mostrar mais 300</button> <span class="sm-t mut">${ext.length-extShown.length} não exibidos</span></div>`:''}`
+    :'<span class="mut">Nenhuma retirada encontrada no período com os filtros atuais.</span>'}
+  </div>`;
+}
+
+/* ── Modal: gerir sócios e pessoas vinculadas ────────────────────── */
+function editSocios(gid){
+  if(!podeEditar()) return bloqueado();
+  const g = grupos().find(x=>x.id===gid); if(!g) return toast('Grupo não encontrado.');
+  const cfg = retCfg(g);
+  const linha = (s)=>`<div style="border:1px solid var(--bd);border-radius:6px;padding:10px;margin-bottom:10px">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <input class="rs-nome" data-id="${s.id}" value="${esc(s.nome)}" placeholder="Nome do sócio" style="flex:1">
+      <button class="sm sec" data-rsdel="${s.id}" title="Excluir sócio">🗑️</button>
+    </div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px">Pessoas que recebem por ele</div>
+    <div class="rs-pes" data-id="${s.id}">
+      ${(s.pessoas||[]).map((p,i)=>`<div style="display:flex;gap:5px;margin-bottom:5px" data-pi="${i}">
+        <input class="rs-pn" value="${esc(p.nome)}" placeholder="Nome exato como aparece no favorecido" style="flex:1.6">
+        <input class="rs-pd" value="${esc(p.doc||'')}" placeholder="CPF (opcional)" style="flex:.9">
+        <select class="rs-pr" style="width:104px"><option value="socio" ${p.rel!=='conjuge'?'selected':''}>o próprio</option><option value="conjuge" ${p.rel==='conjuge'?'selected':''}>cônjuge</option></select>
+        <button class="sm sec" data-rspdel="${s.id}:${i}">✕</button>
+      </div>`).join('')}
+    </div>
+    <button class="sm sec" data-rspadd="${s.id}">+ Adicionar pessoa</button>
+  </div>`;
+  openModal(`<h3>👥 Sócios do grupo ${esc(g.nome)}</h3>
+  <p class="sm-t mut">O nome precisa bater com o favorecido usado no lançamento. O CPF é opcional e serve de reforço quando a pessoa está no cadastro de favorecidos da empresa.</p>
+  <div id="rs-lista" style="max-height:400px;overflow-y:auto;margin:12px 0">${cfg.socios.map(linha).join('')}</div>
+  <button class="sec" id="rs-add">+ Adicionar sócio</button>
+  <div class="right" style="margin-top:14px"><button class="sec" onclick="closeModal()">Cancelar</button><button id="rs-ok">💾 Salvar</button></div>`);
+
+  const coletar = ()=>{
+    document.querySelectorAll('.rs-nome').forEach(inp=>{
+      const s = cfg.socios.find(x=>x.id===+inp.dataset.id); if(!s) return;
+      s.nome = inp.value.trim() || s.nome;
+    });
+    document.querySelectorAll('.rs-pes').forEach(box=>{
+      const s = cfg.socios.find(x=>x.id===+box.dataset.id); if(!s) return;
+      s.pessoas = [...box.children].map(d=>({
+        nome: d.querySelector('.rs-pn').value.trim(),
+        doc:  d.querySelector('.rs-pd').value.trim(),
+        rel:  d.querySelector('.rs-pr').value
+      })).filter(p=>p.nome);
+    });
+  };
+  const redesenhar = ()=>{ coletar(); closeModal(); editSocios(gid); };
+  $('#rs-add').onclick = ()=>{
+    const nid = cfg.socios.reduce((m,x)=>Math.max(m,x.id),0)+1;
+    cfg.socios.push({ id:nid, nome:'Sócio '+nid, pessoas:[{nome:'',doc:'',rel:'socio'}] });
+    redesenhar();
+  };
+  document.querySelectorAll('[data-rspadd]').forEach(b=>b.onclick=()=>{
+    const s = cfg.socios.find(x=>x.id===+b.dataset.rspadd);
+    if(s){ s.pessoas = s.pessoas||[]; coletar(); s.pessoas.push({nome:'',doc:'',rel:'conjuge'}); closeModal(); editSocios(gid); }
+  });
+  document.querySelectorAll('[data-rspdel]').forEach(b=>b.onclick=()=>{
+    const [sid,i] = b.dataset.rspdel.split(':');
+    const s = cfg.socios.find(x=>x.id===+sid);
+    if(s){ coletar(); (s.pessoas||[]).splice(+i,1); closeModal(); editSocios(gid); }
+  });
+  document.querySelectorAll('[data-rsdel]').forEach(b=>b.onclick=()=>{
+    const s = cfg.socios.find(x=>x.id===+b.dataset.rsdel); if(!s) return;
+    if(!confirm('Excluir o sócio "'+s.nome+'"? Os lançamentos não são apagados — apenas deixam de ser somados no placar.')) return;
+    cfg.socios = cfg.socios.filter(x=>x.id!==s.id);
+    closeModal(); editSocios(gid);
+  });
+  $('#rs-ok').onclick = ()=>{
+    coletar();
+    cfg.socios = cfg.socios.filter(s=>(s.nome||'').trim());
+    save(); closeModal(); render(); toast('Sócios salvos.');
+  };
+}
+
+/* ── Modal: reatribuir um lançamento ─────────────────────────────── */
+function retAtribuir(chave){
+  if(!podeEditar()) return bloqueado();
+  const g = grupoAtual(); if(!g) return;
+  const cfg = retCfg(g);
+  const [eid, lid] = chave.split('|');
+  const e = ROOT.empresas.find(x=>String(x.id)===eid);
+  const l = e && (empDB(e).lancs||[]).find(x=>String(x.id)===lid);
+  if(!l) return toast('Lançamento não encontrado.');
+  const atual = cfg.over[chave];
+  openModal(`<h3>Atribuição da retirada</h3>
+  <p class="sm-t mut">${esc(fmtD(l.data))} — ${esc(e.nome)} — ${esc(l.fav||'sem favorecido')} — <b>${fmt(-l.v)}</b></p>
+  <div class="fgrid"><label class="full">Contar para
+    <select id="ra-soc">
+      <option value="auto" ${atual===undefined?'selected':''}>Automático (pelo favorecido)</option>
+      ${cfg.socios.map(s=>`<option value="${s.id}" ${atual===s.id?'selected':''}>${esc(s.nome)}</option>`).join('')}
+      <option value="0" ${atual===0?'selected':''}>Não é retirada — tirar do placar</option>
+    </select></label></div>
+  <p class="sm-t mut">A escolha vale só para este lançamento e prevalece sobre o vínculo do favorecido.</p>
+  <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="ra-ok">Salvar</button></div>`);
+  $('#ra-ok').onclick = ()=>{
+    const v = $('#ra-soc').value;
+    if(v==='auto') delete cfg.over[chave]; else cfg.over[chave] = +v;
+    save(); closeModal(); render(); toast('Atribuição atualizada.');
+  };
+}
+
 /* ── Modal: criar / editar grupo ─────────────────────────────────── */
 function editGrupo(id){
   if(!podeEditar()) return bloqueado();
@@ -1728,6 +2052,36 @@ function bindGrupo(){
   document.querySelectorAll('[data-gsort]').forEach(t=>t.onclick=()=>{
     const c=t.dataset.gsort; GF.sortDir=(GF.sortCol===c?-GF.sortDir:1); GF.sortCol=c; GF.lim=200; render();
   });
+  /* ── Retiradas ── */
+  const rsNovo = $('#rs-novo');
+  if(rsNovo) rsNovo.onclick = ()=>{
+    const g = grupoAtual(); if(!g) return;
+    const cfg = retCfg(g);
+    if(!cfg.socios.length) cfg.socios.push({ id:1, nome:'Sócio 1', pessoas:[{nome:'',doc:'',rel:'socio'}] });
+    editSocios(g.id);
+  };
+  const rsGer = $('#rs-ger'); if(rsGer) rsGer.onclick = ()=>editSocios(GF.gid);
+  const rsF = $('#rs-fsoc');  if(rsF)   rsF.onchange = e=>{ RETF.soc=e.target.value; RETF.lim=200; render(); };
+  const rsQ = $('#rs-q');
+  if(rsQ) rsQ.oninput = e=>{ RETF.q=e.target.value; RETF.lim=200; clearTimeout(window._rsqh);
+    window._rsqh=setTimeout(()=>{ render(); const n=$('#rs-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } },300); };
+  const rsM = $('#rs-more');  if(rsM)  rsM.onclick  = ()=>{ RETF.lim+=300; render(); };
+  const rsP = $('#rs-pmore'); if(rsP)  rsP.onclick  = ()=>{ RETF.pendLim+=20; render(); };
+  const rsC = $('#rs-csv');   if(rsC)  rsC.onclick  = ()=>dl('retiradas_socios.csv', csvOut(GRUPO_CSV), 'text/csv');
+  document.querySelectorAll('[data-rsvinc]').forEach(b=>b.onclick=()=>{
+    const i = +b.dataset.rsvinc;
+    const alvo = RET_PEND[i]; if(!alvo) return;
+    const sid = +(document.querySelector('.rs-psoc[data-i="'+i+'"]')||{}).value;
+    if(!sid) return toast('Escolha o sócio antes de vincular.');
+    const rel = (document.querySelector('.rs-prel[data-i="'+i+'"]')||{}).value || 'conjuge';
+    const g = grupoAtual(); const cfg = retCfg(g);
+    const s = cfg.socios.find(x=>x.id===sid); if(!s) return;
+    s.pessoas = s.pessoas || [];
+    if(!s.pessoas.some(p=>norm(p.nome)===norm(alvo.nome))) s.pessoas.push({ nome:alvo.nome, doc:'', rel });
+    save(); render(); toast(alvo.nome+' vinculado a '+s.nome+'.');
+  });
+  document.querySelectorAll('[data-rsedit]').forEach(b=>b.onclick=()=>retAtribuir(b.dataset.rsedit));
+
   const pr = $('#g-print'); if(pr) pr.onclick = ()=>window.print();
   const cs = $('#g-csv');   if(cs) cs.onclick = ()=>dl('grupo_'+GF.aba+'.csv', csvOut(GRUPO_CSV), 'text/csv');
   const lc = $('#g-lcsv');
