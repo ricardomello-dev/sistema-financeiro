@@ -16,6 +16,8 @@ body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);colo
 #side nav a{display:block;padding:11px 18px;color:#cbd5e0;text-decoration:none;font-size:13.5px;border-left:3px solid transparent;cursor:pointer}
 #side nav a:hover{background:var(--side2)}
 #side nav a.on{background:var(--side2);color:#fff;border-left-color:var(--acc)}
+#side nav .sec-tit{padding:14px 18px 5px;font-size:9.5px;letter-spacing:1.1px;text-transform:uppercase;color:#6d8296;font-weight:600}
+#side nav .sec-tit:first-child{padding-top:8px}
 #side nav a.sub{padding-left:38px;font-size:12.5px;display:none}
 #side nav a.sub.show{display:block}
 #side nav a .carat{float:right;opacity:.6;font-size:11px;transition:transform .15s}
@@ -119,22 +121,29 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     <div class="sub" id="empNomeHeader">Controle de Construtora</div>
     <div style="padding:10px 14px 12px;border-bottom:1px solid #2c3e50"><div style="font-size:10px;color:#8aa;letter-spacing:.5px;margin-bottom:4px">EMPRESA</div><select id="empSel" style="width:100%;background:#16202d;color:#fff;border:1px solid #2c3e50"></select></div>
     <nav id="nav">
-      <a data-v="dash" class="on">📊 Painel</a>
-      <a data-v="lanc">📒 Lançamentos</a>
-      <a data-v="conc">🏦 Conciliação OFX</a>
-      <a data-v="rel">📈 Relatórios</a>
-      <a data-v="grupo">🏢 Visão de Grupo</a>
-      <a data-grp="ai" id="navAiGrp">🤖 Assistente <span class="carat" id="aiCarat">▸</span></a>
-      <a data-v="ai" class="sub" id="navAiChat">💬 Chat</a>
-      <a data-v="aicfg" class="sub" id="navAiCfg">⚙️ Configuração</a>
-      <a data-v="cad">🗂️ Cadastros</a>
-      <a data-v="favs">👥 Favorecidos</a>
-      <a data-v="adm" id="navAdm" style="display:none">⚙️ Administração</a>
-      <a data-v="cpr">💳 Contas a Pagar</a>
-      <a data-v="emailcfg">📧 E-mail</a>
-      <a data-v="docs">📎 Documentos</a>
-      <a data-v="contab">📤 Contabilidade</a>
-      <a data-v="bkp">💾 Backup</a>
+      <div class="sec-tit" data-sec="dia">Dia a dia</div>
+      <a data-v="dash" class="on" data-sec="dia">📊 Painel</a>
+      <a data-v="lanc" data-sec="dia">📒 Lançamentos</a>
+      <a data-v="cpr"  data-sec="dia">💳 Contas a Pagar</a>
+      <a data-v="conc" data-sec="dia">🏦 Conciliação OFX</a>
+      <a data-v="docs" data-sec="dia">📎 Documentos</a>
+
+      <div class="sec-tit" data-sec="ana">Análise</div>
+      <a data-v="rel"   data-sec="ana">📈 Relatórios</a>
+      <a data-v="grupo" data-sec="ana">🏢 Visão de Grupo</a>
+      <a data-grp="ai" id="navAiGrp" data-sec="ana">🤖 Assistente <span class="carat" id="aiCarat">▸</span></a>
+      <a data-v="ai" class="sub" id="navAiChat" data-sec="ana">💬 Chat</a>
+      <a data-v="aicfg" class="sub" id="navAiCfg" data-sec="ana">⚙️ Configuração</a>
+
+      <div class="sec-tit" data-sec="cad">Cadastros</div>
+      <a data-v="favs" data-sec="cad">👥 Favorecidos</a>
+      <a data-v="cad"  data-sec="cad">🗂️ Contas e Categorias</a>
+
+      <div class="sec-tit" data-sec="adm">Administração</div>
+      <a data-v="contab"   data-sec="adm">📤 Contabilidade</a>
+      <a data-v="emailcfg" data-sec="adm">📧 E-mail</a>
+      <a data-v="adm" id="navAdm" style="display:none" data-sec="adm">⚙️ Usuários e Perfis</a>
+      <a data-v="bkp" data-sec="adm">💾 Backup</a>
     </nav>
     <div class="ft" id="userBox"></div>
   </aside>
@@ -3366,7 +3375,7 @@ function vCad(){
   const ed = podeEditar();
   const btnNovo = (fn)=> ed ? `<button class="sm" onclick="${fn}">+ Novo</button>` : '';
   const acoes = (cadFn, delFn)=> ed ? `<button class="sm sec" onclick="${cadFn}">✏️</button> <button class="sm sec" onclick="${delFn}">🗑️</button>` : '';
-  return `<h2>Cadastros</h2>
+  return `<h2>🗂️ Contas e Categorias</h2>
   ${ed?'':'<div class="panel" style="border-left:4px solid var(--warn);padding:10px 14px"><span class="sm-t">🔒 Seu perfil é somente leitura — os cadastros podem ser consultados, mas não alterados.</span></div>'}
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
     <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Contas bancárias ${btnNovo('cadConta(null)')}</h3>
@@ -4530,6 +4539,12 @@ function refreshSide(){
   if(aiCfgLink && !ehAdmin()) aiCfgLink.classList.remove('show');
   if(!hasPerm('ai')) toggleGrupoNav('ai', false);
   else if(VIEW==='ai' || VIEW==='aicfg') toggleGrupoNav('ai', true);
+  // Título de seção sem nenhum item visível vira ruído — some junto
+  document.querySelectorAll('#nav .sec-tit').forEach(t=>{
+    const itens = document.querySelectorAll('#nav a[data-sec="'+t.dataset.sec+'"]');
+    const algum = [...itens].some(a=>a.style.display !== 'none' && !a.classList.contains('sub'));
+    t.style.display = algum ? '' : 'none';
+  });
   const ub = $('#userBox');
   if(ub){
     ub.innerHTML = USER ? `👤 ${esc(USER.nome)}${USER.admin?' <span class="badge b-acc">admin</span>':''}<br><a href="#" id="lnkSair" style="color:#8ab">Sair</a>` : '';
