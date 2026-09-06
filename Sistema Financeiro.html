@@ -62,8 +62,12 @@ button.ok{background:var(--ok)} button.bad{background:var(--bad)} button.sm{padd
 #modal{background:#fff;border-radius:12px;padding:22px;width:560px;max-width:100%;box-shadow:0 24px 60px rgba(15,23,42,.28)}
 #modal h3{margin-top:0}
 .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
-.fgrid label{display:flex;flex-direction:column;font-size:11.5px;color:var(--mut);gap:3px}
+/* min-width:0 é obrigatório: sem ele um <select> com opções longas (plano de
+   conta, por exemplo) define a largura mínima da coluna e estoura o modal. */
+.fgrid label{display:flex;flex-direction:column;font-size:11.5px;color:var(--mut);gap:3px;min-width:0}
 .fgrid .full{grid-column:1/-1}
+.fgrid input,.fgrid select,.fgrid textarea{width:100%;min-width:0;box-sizing:border-box}
+.fgrid select{text-overflow:ellipsis}
 
 /* Modal com cabecalho e rodape fixos e miolo rolavel.
    Ativado por .modal-flex; os modais antigos continuam como estavam. */
@@ -152,6 +156,10 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 .tb-lanc td.acs{white-space:nowrap;text-align:right}
 .tb-lanc td.acs button{opacity:.25;transition:opacity .12s;margin-left:3px}
 .tb-lanc tr:hover td.acs button{opacity:1}
+/* Sem hover (toque) ou navegando por teclado, os botões precisam aparecer:
+   um deles exclui, e ficar invisível é pior do que ficar sempre visível. */
+.tb-lanc td.acs button:focus,.tb-lanc tr:focus-within td.acs button{opacity:1}
+@media (hover:none){.tb-lanc td.acs button{opacity:1}}
 .tb-lanc .ic{font-size:11px;margin-right:3px}
 .tb-lanc .ic.ok{color:var(--ok)} .tb-lanc .ic.wr{color:var(--warn)} .tb-lanc .ic.ac{color:var(--acc)}
 
@@ -172,6 +180,9 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 .rr-s .txt b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rr-s .mais{font-size:18px;color:var(--acc);font-weight:600;opacity:.5}
 .rr-s:hover .mais{opacity:1}
+.rr-s.rr-add{border-style:dashed;border-left-style:dashed;border-left-color:var(--bd);background:#fbfcfe}
+.rr-s.rr-add .ini{background:#e2e8f0;color:var(--mut)}
+.rr-s.rr-add .txt b{color:var(--mut)}
 
 /* Modal de lançamento rápido */
 .rl-seg{display:flex;gap:6px;flex-wrap:wrap}
@@ -1913,9 +1924,13 @@ function retAjustes(g){
 function ctbPeriodoGrupo(){ return { de:GF.de, ate:GF.ate }; }
 
 /* Consolida lançamentos + acertos + saldo inicial em um placar por sócio. */
+/* Sócios que contam para o placar. Um sócio recém-criado e ainda sem nome
+   existe só para ser preenchido no modal — se ele entrasse na conta, o
+   "esperado por sócio" seria dividido por um a mais e TODO o placar mudaria. */
+function sociosVal(cfg){ return (cfg.socios||[]).filter(s=>(s.nome||'').trim()); }
 function retPlacar(g){
   const cfg = retCfg(g);
-  const mapa = new Map(cfg.socios.map(s=>[s.id, {
+  const mapa = new Map(sociosVal(cfg).map(s=>[s.id, {
     s, ret:0, ap:0, n:0, porEmp:{}, porMes:{}, ini:round2(s.saldoIni||0)
   }]));
   const somar = (sid, tipo, v, empId, mes)=>{
@@ -1951,7 +1966,7 @@ function gRetiradas(g){
   const total  = round2(acum.reduce((s,x)=>s+x.liq,0));
   const totRet = round2(acum.reduce((s,x)=>s+x.ret+x.ini,0));
   const totAp  = round2(acum.reduce((s,x)=>s+x.ap,0));
-  const esper  = round2(total / (cfg.socios.length||1));   // participação igual
+  const esper  = round2(total / (acum.length||1));   // participação igual
   const mxTot  = Math.max(1, ...acum.map(x=>Math.abs(x.liq)));
 
   /* Placar de equilíbrio — o número que evita discussão.
@@ -2044,7 +2059,10 @@ function gRetiradas(g){
         <h3>Lançar retirada ou aporte</h3>
         <span class="sm-t mut">Escolha o sócio e o sistema já preenche favorecido, plano de conta e centro de custo do jeito que você usou da última vez.</span>
       </div>
-      <button id="rs-lanc" class="rr-b">+ Novo lançamento</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="sec" id="rs-ger2">👥 Cadastrar / editar sócios</button>
+        <button id="rs-lanc" class="rr-b">+ Novo lançamento</button>
+      </div>
     </div>
     <div class="rr-socios">
       ${acum.map(x=>{
@@ -2056,23 +2074,27 @@ function gRetiradas(g){
           <span class="mais">+</span>
         </button>`;
       }).join('')}
+      <button type="button" class="rr-s rr-add" id="rs-addsoc">
+        <span class="ini">+</span>
+        <span class="txt"><b>Adicionar sócio</b><span class="sm-t mut">e quem recebe por ele</span></span>
+      </button>
     </div>
+    ${acum.length<2?`<div class="rl-aviso amb" style="margin-top:12px">⚠️ Só há <b>${acum.length} sócio</b> cadastrado, então não existe comparação a fazer — o placar só ganha sentido com todos os sócios da sociedade cadastrados.</div>`:''}
   </div>`;
 
   return `
   <div class="cards">${placar}</div>
   <div class="panel" style="padding:10px 14px">
-    <span class="sm-t mut">Retiradas <b>${fmt(totRet)}</b>${totAp?` menos aportes <b>${fmt(totAp)}</b>`:''} dá um líquido de <b>${fmt(total)}</b> — dividido igualmente entre ${cfg.socios.length} sócios, <b>${fmt(esper)}</b> para cada.
+    <span class="sm-t mut">Retiradas <b>${fmt(totRet)}</b>${totAp?` menos aportes <b>${fmt(totAp)}</b>`:''} dá um líquido de <b>${fmt(total)}</b> — dividido igualmente entre ${acum.length} sócios, <b>${fmt(esper)}</b> para cada.
     Quem está acima já se adiantou; quem está abaixo tem valor a receber.</span>
   </div>
   ${rapido}
 
   <div class="flt">
     <label>Empresa<select id="g-emp"><option value="">Todas do grupo</option>${emps.map(e=>`<option value="${e.id}" ${String(GF.emp)===String(e.id)?'selected':''}>${esc(e.nome)}</option>`).join('')}</select></label>
-    <label>Sócio<select id="rs-fsoc"><option value="">Todos</option>${cfg.socios.map(s=>`<option value="${s.id}" ${String(RETF.soc)===String(s.id)?'selected':''}>${esc(s.nome)}</option>`).join('')}</select></label>
+    <label>Sócio<select id="rs-fsoc"><option value="">Todos</option>${sociosVal(cfg).map(s=>`<option value="${s.id}" ${String(RETF.soc)===String(s.id)?'selected':''}>${esc(s.nome)}</option>`).join('')}</select></label>
     <label>Buscar<input id="rs-q" value="${esc(RETF.q)}" placeholder="favorecido, histórico..."></label>
     <button class="sec" id="rs-csv">Exportar CSV</button>
-    ${gerir?`<button class="sec" id="rs-ger">👥 Gerir sócios</button>`:''}
   </div>
 
   <div style="display:flex;gap:18px;flex-wrap:wrap">
@@ -2184,6 +2206,7 @@ window.lancRetirada = function(gid, socioId){
   if(!podeEditar()) return bloqueado();
   const g = grupos().find(x=>x.id===gid); if(!g) return toast('Grupo não encontrado.');
   const cfg = retCfg(g);
+  cfg.socios = sociosVal(cfg);   // descarta linhas em branco deixadas por um cadastro cancelado
   if(!cfg.socios.length) return toast('Cadastre os sócios antes de lançar.');
   const emps = grupoEmpresas(g);
   if(!emps.length) return toast('O grupo não tem empresas.');
@@ -2370,7 +2393,7 @@ function editAjuste(gid, ajId){
       <option value="retirada" ${(!a||a.tipo==='retirada')?'selected':''}>Retirada — o sócio levou valor</option>
       <option value="aporte"   ${a&&a.tipo==='aporte'?'selected':''}>Aporte — o sócio pôs valor</option>
     </select></label>
-    <label>Sócio<select id="aj-soc">${cfg.socios.map(s=>`<option value="${s.id}" ${a&&a.socioId===s.id?'selected':''}>${esc(s.nome)}</option>`).join('')}</select></label>
+    <label>Sócio<select id="aj-soc">${sociosVal(cfg).map(s=>`<option value="${s.id}" ${a&&a.socioId===s.id?'selected':''}>${esc(s.nome)}</option>`).join('')}</select></label>
     <label>Empresa<select id="aj-emp">${emps.map(e=>`<option value="${e.id}" ${a&&a.empId===e.id?'selected':''}>${esc(e.nome)}</option>`).join('')}</select></label>
     <label>Valor (R$)<input type="number" step="0.01" id="aj-v" value="${a?Math.abs(a.valor):''}" placeholder="0,00"></label>
     <label class="full">Descrição<input id="aj-desc" value="${esc(a?(a.desc||''):'')}" placeholder="Ex: ficou com o Fiat Argo placa ABC1D23"></label>
@@ -2402,10 +2425,14 @@ function editAjuste(gid, ajId){
 }
 
 /* ── Modal: gerir sócios e pessoas vinculadas ────────────────────── */
-function editSocios(gid){
+function editSocios(gid, abrirNovo){
   if(!podeEditar()) return bloqueado();
   const g = grupos().find(x=>x.id===gid); if(!g) return toast('Grupo não encontrado.');
   const cfg = retCfg(g);
+  if(abrirNovo){
+    const nid = (cfg.socios.reduce((m,s)=>Math.max(m,s.id),0)||0)+1;
+    cfg.socios.push({ id:nid, nome:'', saldoIni:0, pessoas:[{tipo:'pessoa',nome:'',doc:'',rel:'socio'}] });
+  }
   const linha = (s)=>`<div style="border:1px solid var(--bd);border-radius:6px;padding:10px;margin-bottom:10px">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <input class="rs-nome" data-id="${s.id}" value="${esc(s.nome)}" placeholder="Nome do sócio" style="flex:1">
@@ -2460,7 +2487,8 @@ function editSocios(gid){
   const redesenhar = ()=>{ coletar(); closeModal(); editSocios(gid); };
   $('#rs-add').onclick = ()=>{
     const nid = cfg.socios.reduce((m,x)=>Math.max(m,x.id),0)+1;
-    cfg.socios.push({ id:nid, nome:'Sócio '+nid, saldoIni:0, pessoas:[{tipo:'pessoa',nome:'',doc:'',rel:'socio'}] });
+    // nome vazio de propósito: sociosVal() ignora, então desistir não afeta o placar
+    cfg.socios.push({ id:nid, nome:'', saldoIni:0, pessoas:[{tipo:'pessoa',nome:'',doc:'',rel:'socio'}] });
     redesenhar();
   };
   document.querySelectorAll('[data-rspadd]').forEach(b=>b.onclick=()=>{
@@ -2577,11 +2605,14 @@ function bindGrupo(){
   if(rsNovo) rsNovo.onclick = ()=>{
     const g = grupoAtual(); if(!g) return;
     const cfg = retCfg(g);
-    if(!cfg.socios.length) cfg.socios.push({ id:1, nome:'Sócio 1', saldoIni:0, pessoas:[{tipo:'pessoa',nome:'',doc:'',rel:'socio'}] });
+    if(!cfg.socios.length) cfg.socios.push({ id:1, nome:'', saldoIni:0, pessoas:[{tipo:'pessoa',nome:'',doc:'',rel:'socio'}] });
     editSocios(g.id);
   };
-  const rsGer = $('#rs-ger'); if(rsGer) rsGer.onclick = ()=>editSocios(GF.gid);
   const rsL = $('#rs-lanc'); if(rsL) rsL.onclick = ()=>lancRetirada(GF.gid, null);
+  const rsG2 = $('#rs-ger2');  if(rsG2) rsG2.onclick = ()=>editSocios(GF.gid);
+  /* Abre o modal já com uma linha em branco pronta. O sócio sem nome é
+     ignorado por sociosVal(), então cancelar não contamina o placar. */
+  const rsAdd = $('#rs-addsoc'); if(rsAdd) rsAdd.onclick = ()=>editSocios(GF.gid, true);
   document.querySelectorAll('[data-rslanc]').forEach(b=>b.onclick=()=>lancRetirada(GF.gid, +b.dataset.rslanc));
   const rsF = $('#rs-fsoc');  if(rsF)   rsF.onchange = e=>{ RETF.soc=e.target.value; RETF.lim=200; render(); };
   const rsQ = $('#rs-q');
@@ -3911,18 +3942,22 @@ function vFavs(){
   const nCols = 9 + cols.filter(c=>c.show).length;
   const th = (k,lb,cls)=>`<th class="${cls||''}" data-fsort="${k}" style="cursor:pointer;user-select:none">${lb} ${FVF.sortCol===k?(FVF.sortDir===1?'↑':'↓'):'↕'}</th>`;
   return `<h2>👥 Favorecidos</h2>
-  <div class="flt">
-    <label>Buscar<input id="fv-q" value="${esc(FVF.q)}" placeholder="nome, documento, e-mail, telefone..." style="width:240px"></label>
-    <label>Tipo<select id="fv-tipo"><option value="">Todos</option>${FAV_TIPOS.map(t=>`<option ${FVF.tipo===t?'selected':''}>${t}</option>`).join('')}</select></label>
+  <div class="lanc-top">
+    <div class="lanc-per">
+      <label class="lanc-busca">Buscar<input id="fv-q" value="${esc(FVF.q)}" placeholder="nome, documento, e-mail, telefone..."></label>
+      <label>Tipo<select id="fv-tipo"><option value="">Todos</option>${FAV_TIPOS.map(t=>`<option ${FVF.tipo===t?'selected':''}>${t}</option>`).join('')}</select></label>
+    </div>
+  </div>
+  <div class="toolbar">
     ${podeEditar()?`<button id="fv-novo">+ Novo favorecido</button>
-    <button class="sec" id="fv-imp">📥 Importar planilha</button>`:'<span class="badge b-mut" style="align-self:flex-end;margin-bottom:6px">🔒 somente leitura</span>'}
+    <button class="sec" id="fv-imp">📥 Importar planilha</button>`:'<span class="badge b-mut">🔒 somente leitura</span>'}
     <button class="sec" id="fv-mod">📄 Baixar modelo</button>
     <button class="sec" id="fv-exp">Exportar CSV</button>
     ${podeEditar()?'<button class="sec" id="fv-cols">⚙️ Colunas extras</button>':''}
-    <span class="mut sm-t" style="align-self:flex-end;padding-bottom:6px">${L.length} de ${favs().length} favorecidos</span>
+    <span class="mut sm-t" style="margin-left:auto">${L.length} de ${favs().length} favorecidos</span>
   </div>
   <input type="file" id="fv-file" accept=".xlsx,.xls,.csv" style="display:none">
-  <div class="panel"><table>
+  <div class="panel" style="padding:0;overflow:hidden"><table class="tb-lanc">
     <tr>${th('nome','Nome / Razão Social')}${th('doc','CPF / CNPJ')}${th('tipo','Tipo')}
       <th>Telefone</th><th>E-mail</th><th>Plano padrão</th><th>Centro padrão</th>
       ${cols.map((c,i)=>c.show?`<th>${esc(favColName(i))}</th>`:'').join('')}
@@ -3937,9 +3972,13 @@ function vFavs(){
       <td class="sm-t mut">${f.cc?esc(ccN(f.cc)):'—'}</td>
       ${cols.map((c,i)=>c.show?`<td class="sm-t">${esc(f['x'+(i+1)]||'—')}</td>`:'').join('')}
       <td class="r">${usoFav(f)}</td>
-      <td style="white-space:nowrap">${podeEditar()?`<button class="sm sec" data-fed="${esc(f.id)}">✏️</button> <button class="sm sec" data-fdel="${esc(f.id)}">🗑️</button>`:''}</td>
+      <td class="acs">${podeEditar()?`<button class="sm sec" data-fed="${esc(f.id)}" title="Editar">✏️</button><button class="sm sec" data-fdel="${esc(f.id)}" title="Excluir">🗑️</button>`:''}</td>
     </tr>`).join('')
-    :`<tr><td colspan="${nCols}" class="mut" style="text-align:center;padding:20px">${favs().length?'Nenhum favorecido encontrado com esse filtro.':(podeEditar()?'Nenhum favorecido cadastrado. Use <b>+ Novo favorecido</b> ou <b>📥 Importar planilha</b>.':'Nenhum favorecido cadastrado.')}</td></tr>`}
+    :`<tr><td colspan="${nCols}" style="text-align:center;padding:40px 20px">
+        <div style="font-size:28px;opacity:.35;margin-bottom:8px">👥</div>
+        <div style="font-size:14px;color:var(--tx);margin-bottom:4px">${favs().length?'Nenhum favorecido encontrado com esse filtro':'Nenhum favorecido cadastrado ainda'}</div>
+        <div class="sm-t mut">${favs().length?'Limpe a busca ou troque o tipo.':(podeEditar()?'Use <b>+ Novo favorecido</b> para cadastrar um, ou <b>📥 Importar planilha</b> para trazer vários de uma vez.':'')}</div>
+      </td></tr>`}
   </table></div>`;
 }
 
@@ -3973,20 +4012,51 @@ window.cadFav = function(id){
   const f = id ? favs().find(x=>String(x.id)===String(id)) : null;
   if(id && !f) return toast('Favorecido não encontrado.');
   const cols = favCols();
-  openModal(`<h3>${f?'Editar':'Novo'} favorecido</h3>
-  <div class="fgrid">
-    <label class="full">Nome ou Razão Social *<input id="f-nome" value="${esc(f?f.nome:'')}"></label>
-    <label>CPF ou CNPJ<input id="f-doc" value="${esc(f?(f.doc||''):'')}" placeholder="000.000.000-00 ou 00.000.000/0001-00"></label>
-    <label>Tipo<select id="f-tipo">${FAV_TIPOS.map(t=>`<option ${(f&&f.tipo===t)?'selected':''}>${t}</option>`).join('')}</select></label>
-    <label class="full">Endereço<input id="f-end" value="${esc(f?(f.endereco||''):'')}" placeholder="Rua, número, bairro, cidade/UF, CEP"></label>
-    <label>Telefone<input id="f-tel" value="${esc(f?(f.tel||''):'')}" placeholder="(00) 00000-0000"></label>
-    <label>E-mail<input id="f-mail" type="email" value="${esc(f?(f.email||''):'')}" placeholder="contato@empresa.com.br"></label>
-    <label>Plano de conta padrão<select id="f-pl"><option value="">— nenhum —</option>${[...DB.planos].sort(planoSort).map(p=>`<option value="${p.id}" ${f&&f.pl===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select></label>
-    <label>Centro de custo padrão<select id="f-cc"><option value="">— nenhum —</option>${DB.ccustos.map(c=>`<option value="${c.id}" ${f&&f.cc===c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select></label>
-    ${cols.map((c,i)=>`<label>${esc(favColName(i))}<input id="f-x${i+1}" value="${esc(f?(f['x'+(i+1)]||''):'')}"></label>`).join('')}
-    <label class="full">Observação<input id="f-obs" value="${esc(f?(f.obs||''):'')}"></label>
+  const temExtra = !!(f && (f.x1||f.x2||f.x3||f.obs));
+  openModal(`
+  <div class="mhead"><h3>${f?'Editar':'Novo'} favorecido</h3></div>
+  <div class="mbody">
+    <div class="fsec">
+      <div class="ft">Identificação</div>
+      <div class="fgrid">
+        <label class="full">Nome ou Razão Social *<input id="f-nome" value="${esc(f?f.nome:'')}" placeholder="como aparece na nota fiscal"></label>
+        <label>CPF ou CNPJ<input id="f-doc" value="${esc(f?(f.doc||''):'')}" placeholder="000.000.000-00"></label>
+        <label>Tipo<select id="f-tipo">${FAV_TIPOS.map(t=>`<option ${(f&&f.tipo===t)?'selected':''}>${t}</option>`).join('')}</select></label>
+      </div>
+    </div>
+    <div class="fsec">
+      <div class="ft">Contato</div>
+      <div class="fgrid">
+        <label class="full">Endereço<input id="f-end" value="${esc(f?(f.endereco||''):'')}" placeholder="Rua, número, bairro, cidade/UF, CEP"></label>
+        <label>Telefone<input id="f-tel" value="${esc(f?(f.tel||''):'')}" placeholder="(00) 00000-0000"></label>
+        <label>E-mail<input id="f-mail" type="email" value="${esc(f?(f.email||''):'')}" placeholder="contato@empresa.com.br"></label>
+      </div>
+    </div>
+    <div class="fsec">
+      <div class="ft">Classificação automática</div>
+      <p class="sm-t mut" style="margin:0 0 8px">Ao escolher este favorecido num lançamento, estes campos já vêm preenchidos.</p>
+      <div class="fgrid">
+        <label>Plano de conta padrão<select id="f-pl"><option value="">— nenhum —</option>${[...DB.planos].sort(planoSort).map(p=>`<option value="${p.id}" ${f&&f.pl===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select></label>
+        <label>Centro de custo padrão<select id="f-cc"><option value="">— nenhum —</option>${DB.ccustos.map(c=>`<option value="${c.id}" ${f&&f.cc===c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select></label>
+      </div>
+      <details class="fdet" ${temExtra?'open':''}>
+        <summary>Observação e colunas extras<span class="cnt">${temExtra?'preenchido':'opcional'}</span></summary>
+        <div class="fdin">
+          <div class="fgrid">
+            ${cols.map((c,i)=>`<label>${esc(favColName(i))}<input id="f-x${i+1}" value="${esc(f?(f['x'+(i+1)]||''):'')}"></label>`).join('')}
+            <label class="full">Observação<input id="f-obs" value="${esc(f?(f.obs||''):'')}"></label>
+          </div>
+        </div>
+      </details>
+    </div>
   </div>
-  <div class="right"><button class="sec" onclick="closeModal()">Cancelar</button><button id="f-ok">💾 Salvar</button></div>`);
+  <div class="mfoot">
+    ${f?`<button class="sec esq" id="f-del">🗑️ Excluir</button>`:''}
+    <button class="sec" onclick="closeModal()">Cancelar</button><button id="f-ok">💾 Salvar</button>
+  </div>`, true);
+  // delFav confirma e só então fecha — desistir não perde o que já foi digitado
+  const fdel = $('#f-del');
+  if(fdel) fdel.onclick = ()=>delFav(f.id);
   $('#f-ok').onclick = ()=>{
     const nome = $('#f-nome').value.trim();
     if(!nome) return alert('Informe o nome ou razão social.');
@@ -4009,7 +4079,7 @@ window.delFav = function(id){
   const n = usoFav(f);
   if(!confirm('Excluir o favorecido "'+f.nome+'"?'+(n?'\n\nEle aparece em '+n+' lançamento(s). Os lançamentos NÃO serão apagados — apenas o cadastro.':''))) return;
   DB.favorecidos = favs().filter(x=>String(x.id)!==String(id));
-  save(); render(); toast('Favorecido excluído.');
+  save(); closeModal(); render(); toast('Favorecido excluído.');
 };
 
 /* ── Cabeçalhos da planilha ──────────────────────────────────────── */
@@ -4918,7 +4988,15 @@ function openModal(html, flex){
   $('#modalBg').classList.add('show');
   const b = m.querySelector('.mbody'); if(b) b.scrollTop = 0;
 }
-window.closeModal = ()=>$('#modalBg').classList.remove('show');
+/* Limpa o conteúdo ao fechar. Sem isso os ids do último modal continuam no
+   DOM e podem colidir com ids da tela de fundo (o modal de favorecido usa
+   f-tipo/f-pl/f-cc, os mesmos nomes dos filtros de Lançamentos). */
+window.closeModal = ()=>{
+  const bg = $('#modalBg'); if(!bg) return;
+  bg.classList.remove('show');
+  const m = $('#modal');
+  if(m){ m.innerHTML = ''; m.classList.remove('modal-flex'); }
+};
 $('#modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeModal(); });
 
 /* ============ LOGIN / SESSÃO ============ */
