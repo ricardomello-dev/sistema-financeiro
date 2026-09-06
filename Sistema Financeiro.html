@@ -72,6 +72,7 @@ button.ok{background:var(--ok)} button.bad{background:var(--bad)} button.sm{padd
 /* Modal com cabecalho e rodape fixos e miolo rolavel.
    Ativado por .modal-flex; os modais antigos continuam como estavam. */
 #modal.modal-flex{display:flex;flex-direction:column;max-height:calc(100vh - 80px);padding:0;overflow:hidden}
+#modal.modal-lg{width:820px}
 .mhead{padding:16px 22px 12px;border-bottom:1px solid var(--bd);flex-shrink:0}
 .mhead h3{margin:0 0 10px;font-size:16px}
 .mbody{padding:4px 22px 16px;overflow-y:auto;flex:1;min-height:0}
@@ -162,6 +163,25 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 @media (hover:none){.tb-lanc td.acs button{opacity:1}}
 .tb-lanc .ic{font-size:11px;margin-right:3px}
 .tb-lanc .ic.ok{color:var(--ok)} .tb-lanc .ic.wr{color:var(--warn)} .tb-lanc .ic.ac{color:var(--acc)}
+
+/* Modal de cadastro de sócios — grid que encolhe em vez de estourar */
+.soc-b{border:1px solid var(--bd);border-radius:8px;padding:13px 14px;margin-bottom:12px;background:#fbfcfe}
+.soc-cab{display:grid;grid-template-columns:1fr 160px auto;gap:9px;align-items:end;margin-bottom:12px}
+.soc-cab label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--mut);min-width:0}
+.soc-cab input{width:100%;min-width:0}
+.soc-cab button{align-self:end;margin-bottom:1px}
+.soc-tt{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:7px;padding-top:9px;border-top:1px solid var(--bd)}
+.soc-p,.soc-hd{display:grid;grid-template-columns:88px minmax(0,1.7fr) minmax(0,1fr) 118px 30px;gap:6px;align-items:center}
+.soc-hd{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;padding:0 2px}
+.soc-p{margin-bottom:6px}
+.soc-p > *{min-width:0;width:100%}
+.soc-p button{padding:6px 0}
+@media(max-width:900px){
+  .soc-p,.soc-hd{grid-template-columns:1fr 1fr}
+  .soc-hd{display:none}
+  .soc-p{border:1px solid var(--bd);border-radius:6px;padding:8px;background:#fff}
+  .soc-cab{grid-template-columns:1fr}
+}
 
 /* Retiradas — painel de lançamento rápido */
 .rs-rapido{border-left:4px solid var(--acc)}
@@ -2433,37 +2453,50 @@ function editSocios(gid, abrirNovo){
     const nid = (cfg.socios.reduce((m,s)=>Math.max(m,s.id),0)||0)+1;
     cfg.socios.push({ id:nid, nome:'', saldoIni:0, pessoas:[{tipo:'pessoa',nome:'',doc:'',rel:'socio'}] });
   }
-  const linha = (s)=>`<div style="border:1px solid var(--bd);border-radius:6px;padding:10px;margin-bottom:10px">
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <input class="rs-nome" data-id="${s.id}" value="${esc(s.nome)}" placeholder="Nome do sócio" style="flex:1">
-      <label style="font-size:11px;color:var(--mut);display:flex;flex-direction:column;gap:2px;width:150px">já retirado antes
-        <input type="number" step="0.01" class="rs-ini" data-id="${s.id}" value="${s.saldoIni||0}" title="Valor que este sócio já havia retirado antes de o sistema começar a contar. Negativo = a empresa devia a ele.">
-      </label>
-      <button class="sm sec" data-rsdel="${s.id}" title="Excluir sócio">🗑️</button>
+  const linha = (s, n)=>`<div class="soc-b">
+    <div class="soc-cab">
+      <label>Nome do sócio ${n}
+        <input class="rs-nome" data-id="${s.id}" value="${esc(s.nome)}" placeholder="ex.: Ricardo Mello"></label>
+      <label>Já retirado antes (R$)
+        <input type="number" step="0.01" class="rs-ini" data-id="${s.id}" value="${s.saldoIni||0}" title="Quanto este sócio já havia retirado antes de o sistema começar a contar. Negativo = a empresa devia a ele."></label>
+      <button class="sec sm" data-rsdel="${s.id}" title="Excluir este sócio">🗑️</button>
     </div>
-    <div style="font-size:11px;color:var(--mut);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px">Quem pode receber por ele</div>
+    <div class="soc-tt">Quem pode receber por ele</div>
+    <div class="soc-hd">
+      <span>Tipo</span><span>Nome exato como aparece no favorecido</span><span>CPF ou CNPJ</span><span>Relação</span><span></span>
+    </div>
     <div class="rs-pes" data-id="${s.id}">
-      ${(s.pessoas||[]).map((p,i)=>`<div style="display:flex;gap:5px;margin-bottom:5px" data-pi="${i}">
-        <select class="rs-pt" style="width:92px"><option value="pessoa" ${p.tipo!=='empresa'?'selected':''}>pessoa</option><option value="empresa" ${p.tipo==='empresa'?'selected':''}>empresa</option></select>
-        <input class="rs-pn" value="${esc(p.nome)}" placeholder="Nome exato como aparece no favorecido" style="flex:1.6">
-        <input class="rs-pd" value="${esc(p.doc||'')}" placeholder="CPF ou CNPJ" style="flex:.9">
-        <select class="rs-pr" style="width:110px">
+      ${(s.pessoas||[]).map((p,i)=>`<div class="soc-p" data-pi="${i}">
+        <select class="rs-pt"><option value="pessoa" ${p.tipo!=='empresa'?'selected':''}>pessoa</option><option value="empresa" ${p.tipo==='empresa'?'selected':''}>empresa</option></select>
+        <input class="rs-pn" value="${esc(p.nome)}" placeholder="nome como está no lançamento">
+        <input class="rs-pd" value="${esc(p.doc||'')}" placeholder="opcional">
+        <select class="rs-pr">
           <option value="socio"   ${p.rel==='socio'?'selected':''}>o próprio</option>
           <option value="conjuge" ${p.rel==='conjuge'?'selected':''}>cônjuge</option>
           <option value="empresa" ${p.rel==='empresa'?'selected':''}>empresa dele</option>
           <option value="outro"   ${p.rel==='outro'?'selected':''}>outro</option>
         </select>
-        <button class="sm sec" data-rspdel="${s.id}:${i}">✕</button>
+        <button class="sm sec" data-rspdel="${s.id}:${i}" title="Remover">✕</button>
       </div>`).join('')}
     </div>
-    <button class="sm sec" data-rspadd="${s.id}">+ Adicionar</button>
+    <button class="sm sec" data-rspadd="${s.id}" style="margin-top:4px">+ Adicionar pessoa ou empresa</button>
   </div>`;
-  openModal(`<h3>👥 Sócios do grupo ${esc(g.nome)}</h3>
-  <p class="sm-t mut">Cadastre quem recebe no lugar do sócio — cônjuge, ou uma <b>empresa dele</b> que preste serviço ao grupo. Todo pagamento a qualquer um deles cai na conta do sócio. O nome precisa bater com o favorecido usado no lançamento; o CPF ou CNPJ é reforço quando a pessoa está no cadastro de favorecidos.</p>
-  <p class="sm-t mut"><b>Já retirado antes:</b> o quanto cada sócio havia retirado antes de o sistema começar a contar, para o placar nascer com o histórico certo. Use negativo se a empresa devia a ele.</p>
-  <div id="rs-lista" style="max-height:400px;overflow-y:auto;margin:12px 0">${cfg.socios.map(linha).join('')}</div>
-  <button class="sec" id="rs-add">+ Adicionar sócio</button>
-  <div class="right" style="margin-top:14px"><button class="sec" onclick="closeModal()">Cancelar</button><button id="rs-ok">💾 Salvar</button></div>`);
+  openModal(`
+  <div class="mhead">
+    <h3>👥 Sócios do grupo ${esc(g.nome)}</h3>
+    <p class="sm-t mut" style="margin:0">Cadastre quem recebe <b>no lugar</b> do sócio — cônjuge, ou uma empresa dele. Todo pagamento a qualquer um deles cai na conta do sócio.</p>
+  </div>
+  <div class="mbody">
+    <div class="rl-aviso" style="margin:12px 0 4px">
+      <b>O nome é o que faz o vínculo.</b> Ele precisa bater com o favorecido digitado no lançamento — o sistema ignora maiúsculas e acentos, mas não adivinha abreviações. O CPF/CNPJ é reforço, e só funciona quando a pessoa também está no cadastro de Favorecidos.
+    </div>
+    <div id="rs-lista">${cfg.socios.map((s,i)=>linha(s,i+1)).join('')}</div>
+    <button class="sec" id="rs-add">+ Adicionar sócio</button>
+  </div>
+  <div class="mfoot">
+    <span class="sm-t mut esq">Sócios sem nome são descartados ao salvar.</span>
+    <button class="sec" onclick="closeModal()">Cancelar</button><button id="rs-ok">💾 Salvar</button>
+  </div>`, true, 'modal-lg');
 
   const coletar = ()=>{
     document.querySelectorAll('.rs-nome').forEach(inp=>{
@@ -4981,10 +5014,12 @@ function bindAICfg(){
 /* flex=true monta o modal com cabeçalho e rodapé fixos e miolo rolável.
    O HTML precisa vir com .mhead / .mbody / .mfoot. Sem o flag, tudo segue
    como sempre foi — os outros modais do sistema não mudam. */
-function openModal(html, flex){
+function openModal(html, flex, extra){
   const m = $('#modal');
   m.innerHTML = html;
-  m.classList.toggle('modal-flex', !!flex);
+  m.className = '';                       // limpa modal-flex/modal-lg do modal anterior
+  if(flex)  m.classList.add('modal-flex');
+  if(extra) m.classList.add(extra);
   $('#modalBg').classList.add('show');
   const b = m.querySelector('.mbody'); if(b) b.scrollTop = 0;
 }
@@ -4995,7 +5030,7 @@ window.closeModal = ()=>{
   const bg = $('#modalBg'); if(!bg) return;
   bg.classList.remove('show');
   const m = $('#modal');
-  if(m){ m.innerHTML = ''; m.classList.remove('modal-flex'); }
+  if(m){ m.innerHTML = ''; m.className = ''; }
 };
 $('#modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeModal(); });
 
