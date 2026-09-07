@@ -2510,6 +2510,9 @@ function editSocios(gid, abrirNovo){
     const nid = (cfg.socios.reduce((m,s)=>Math.max(m,s.id),0)||0)+1;
     cfg.socios.push({ id:nid, nome:'', saldoIni:0, pessoas:[{tipo:'pessoa',nome:'',doc:'',rel:'socio'}] });
   }
+  // grupos que já têm sócios, para oferecer cópia — evita redigitar nomes e CPFs
+  // ao dividir um grupo em sociedades separadas
+  const outros = grupos().filter(x=>x.id!==gid && sociosVal(x.ret||{socios:[]}).length);
   const linha = (s, n)=>`<div class="soc-b">
     <div class="soc-cab">
       <label>Nome do sócio ${n}
@@ -2548,7 +2551,13 @@ function editSocios(gid, abrirNovo){
       <b>O nome é o que faz o vínculo.</b> Ele precisa bater com o favorecido digitado no lançamento — o sistema ignora maiúsculas e acentos, mas não adivinha abreviações. O CPF/CNPJ é reforço, e só funciona quando a pessoa também está no cadastro de Favorecidos.
     </div>
     <div id="rs-lista">${cfg.socios.map((s,i)=>linha(s,i+1)).join('')}</div>
-    <button class="sec" id="rs-add">+ Adicionar sócio</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="sec" id="rs-add">+ Adicionar sócio</button>
+      ${outros.length?`<span class="sm-t mut">ou</span>
+      <select id="rs-copia" style="max-width:230px"><option value="">— copiar sócios de outro grupo —</option>
+        ${outros.map(o=>`<option value="${o.id}">${esc(o.nome)} (${sociosVal(o.ret||{socios:[]}).length})</option>`).join('')}
+      </select>`:''}
+    </div>
   </div>
   <div class="mfoot">
     <span class="sm-t mut esq">Sócios sem nome são descartados ao salvar.</span>
@@ -2575,6 +2584,26 @@ function editSocios(gid, abrirNovo){
     });
   };
   const redesenhar = ()=>{ coletar(); closeModal(); editSocios(gid); };
+  const cop = $('#rs-copia');
+  if(cop) cop.onchange = ()=>{
+    const o = grupos().find(x=>x.id===+cop.value); cop.value='';
+    if(!o) return;
+    const fonte = sociosVal(o.ret||{socios:[]});
+    const ja = new Set(cfg.socios.map(s=>norm(s.nome)));
+    const novos = fonte.filter(s=>!ja.has(norm(s.nome)));
+    if(!novos.length) return alert('Todos os sócios de "'+o.nome+'" já estão neste grupo.');
+    if(!confirm(`Copiar ${novos.length} sócio(s) de "${o.nome}" para "${g.nome}"?\n\n`
+      + novos.map(s=>'• '+s.nome).join('\n')
+      + `\n\nAs pessoas vinculadas vêm junto. O "já retirado antes" começa em zero, porque é um placar novo.`)) return;
+    coletar();
+    let nid = cfg.socios.reduce((m,x)=>Math.max(m,x.id),0);
+    novos.forEach(s=>cfg.socios.push({
+      id: ++nid, nome: s.nome, saldoIni: 0,
+      pessoas: (s.pessoas||[]).map(p=>({ tipo:p.tipo, nome:p.nome, doc:p.doc||'', rel:p.rel }))
+    }));
+    closeModal(); editSocios(gid);
+    toast(novos.length+' sócio(s) copiados. Confira e clique em Salvar.');
+  };
   $('#rs-add').onclick = ()=>{
     const nid = cfg.socios.reduce((m,x)=>Math.max(m,x.id),0)+1;
     // nome vazio de propósito: sociosVal() ignora, então desistir não afeta o placar
