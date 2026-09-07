@@ -164,6 +164,19 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 .tb-lanc .ic{font-size:11px;margin-right:3px}
 .tb-lanc .ic.ok{color:var(--ok)} .tb-lanc .ic.wr{color:var(--warn)} .tb-lanc .ic.ac{color:var(--acc)}
 
+/* Escopo do grupo — deixa explícito quais empresas o painel considera */
+.g-escopo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--card);border:1px solid var(--bd);border-radius:7px;padding:8px 12px;margin-bottom:12px;font-size:12px}
+.g-escopo .et{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);font-weight:600}
+.g-escopo .fora{color:var(--mut);font-size:11.5px}
+
+/* Seleção de empresas no modal de grupo */
+.gm-l{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:6px;font-size:13px;color:var(--tx);cursor:pointer}
+.gm-l:hover{background:#eef5ff}
+.gm-l input{width:auto;flex:none}
+.gm-l .gm-n{flex:1;min-width:0}
+.gm-l.ocupada{opacity:.6;cursor:not-allowed}
+.gm-l.ocupada:hover{background:transparent}
+
 /* Limpeza de categorias sem uso */
 .lc-lista{max-height:320px;overflow-y:auto;border:1px solid var(--bd);border-radius:7px;padding:6px;background:#fbfcfe}
 .lc-i{display:flex;align-items:flex-start;gap:8px;padding:5px 7px;border-radius:5px;font-size:12.5px;color:var(--tx);cursor:pointer}
@@ -1581,6 +1594,10 @@ function grupoAtual(){
   const gs = gruposVisiveis();
   return gs.find(g=>g.id===GF.gid) || gs[0] || null;
 }
+/* Empresa pertence a no máximo um grupo. Estas duas funções são a fonte
+   da verdade dessa regra em todas as telas. */
+function grupoDaEmpresa(empId){ return grupos().find(g=>(g.empresas||[]).includes(empId)) || null; }
+function empresasSemGrupo(){ return userEmps().filter(e=>!grupoDaEmpresa(e.id)); }
 /* Empresas do grupo que o usuário pode ver */
 function grupoEmpresas(g){
   if(!g) return [];
@@ -1643,15 +1660,25 @@ function vGrupo(){
   }
   const emps = grupoEmpresas(g);
   const abas = [['painel','📊 Painel'],['comp','⚖️ Comparativo'],['ret','💸 Retiradas'],['lanc','📒 Lançamentos'],['rel','📈 Relatórios']];
+  const fora = empresasSemGrupo();
   return head + `
   <div class="flt">
     <label>Grupo<select id="g-sel">${gs.map(x=>`<option value="${x.id}" ${x.id===g.id?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></label>
     <label>De<input type="date" id="g-de" value="${GF.de}"></label>
     <label>Até<input type="date" id="g-ate" value="${GF.ate}"></label>
-    <span class="sm-t mut" style="align-self:flex-end;padding-bottom:6px">${emps.length} empresa(s) no grupo</span>
     ${gerir?`<button class="sm sec" id="g-edit" title="Editar empresas do grupo">✏️ Editar grupo</button>
              <button class="sm sec" id="g-novo">+ Novo grupo</button>`:''}
   </div>
+  <div class="g-escopo">
+    <span class="et">Este painel considera apenas</span>
+    ${emps.map(e=>`<span class="badge b-acc">${esc(e.nome)}</span>`).join('')}
+    ${fora.length?`<span class="fora">· fora deste grupo: ${fora.map(e=>esc(e.nome)).join(', ')}</span>`:''}
+  </div>
+  ${fora.length && gerir?`<div class="rl-aviso amb" style="margin-bottom:12px">
+    <b>${fora.length} empresa(s) não pertencem a grupo nenhum:</b> ${fora.map(e=>esc(e.nome)).join(', ')}.
+    Elas não aparecem em nenhuma Visão de Grupo e não têm controle de retiradas.
+    <div style="margin-top:7px"><button class="sm" id="g-orfas">Criar grupo para essas empresas</button></div>
+  </div>`:''}
   ${periodBtns('gf', GF.de, GF.ate)}
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
     ${abas.map(([k,l])=>`<button class="${GF.aba===k?'':'sec'}" data-gaba="${k}">${l}</button>`).join('')}
@@ -1938,15 +1965,27 @@ function retLancs(g){
 function retAjustes(g){
   const cfg = retCfg(g);
   const p = ctbPeriodoGrupo();
+  /* Só contam acertos de empresas que AINDA pertencem ao grupo. Sem isso, tirar
+     uma empresa do grupo deixava os acertos dela somando no placar enquanto
+     sumiam da matriz empresa × sócio — e os dois números paravam de fechar. */
+  const doGrupo = new Set(grupoEmpresas(g).map(e=>e.id));
   return cfg.ajustes
+    .filter(a=>doGrupo.has(a.empId))
     .filter(a=>a.data && (!p.de || a.data >= p.de) && (!p.ate || a.data <= p.ate))
     .filter(a=>!GF.emp || String(a.empId) === String(GF.emp))
     .map(a=>{
-      const s = cfg.socios.find(x=>x.id===a.socioId);
+      const s = sociosVal(cfg).find(x=>x.id===a.socioId);
       const e = ROOT.empresas.find(x=>x.id===a.empId);
       return s ? { aj:a, e, s, tipo:a.tipo, v:round2(Math.abs(a.valor||0)) } : null;
     })
     .filter(Boolean);
+}
+/* Acertos que ficaram órfãos porque a empresa saiu do grupo — a tela avisa
+   em vez de simplesmente sumir com o valor. */
+function retAjustesForaDoGrupo(g){
+  const cfg = retCfg(g);
+  const doGrupo = new Set(grupoEmpresas(g).map(e=>e.id));
+  return (cfg.ajustes||[]).filter(a=>!doGrupo.has(a.empId));
 }
 function ctbPeriodoGrupo(){ return { de:GF.de, ate:GF.ate }; }
 
@@ -2079,6 +2118,7 @@ function gRetiradas(g){
 
   /* Lançamento rápido — atalho por sócio. Evita ter que trocar de empresa,
      achar o plano de conta certo e digitar o favorecido na mão. */
+  const orfaos = retAjustesForaDoGrupo(g);
   const rapido = !gerir ? '' : `
   <div class="panel rs-rapido">
     <div class="rr-cab">
@@ -2110,6 +2150,16 @@ function gRetiradas(g){
   </div>`;
 
   return `
+  <div class="rl-aviso" style="margin-bottom:14px">
+    Sócios e retiradas de <b>${esc(g.nome)}</b>. Só entram aqui as empresas deste grupo:
+    ${emps.map(e=>`<span class="badge b-acc">${esc(e.nome)}</span>`).join(' ')}.
+    Outro grupo tem seus próprios sócios e seu próprio placar.
+  </div>
+  ${orfaos.length?`<div class="rl-aviso amb" style="margin-bottom:14px">
+    <b>${orfaos.length} acerto(s) manual(is) não estão sendo contados:</b> pertencem a empresas que saíram deste grupo
+    (${[...new Set(orfaos.map(a=>(ROOT.empresas.find(e=>e.id===a.empId)||{}).nome||'empresa removida'))].join(', ')}).
+    Não foram apagados — voltam a contar se a empresa voltar ao grupo.
+  </div>`:''}
   <div class="cards">${placar}</div>
   <div class="panel" style="padding:10px 14px">
     <span class="sm-t mut">Retiradas <b>${fmt(totRet)}</b>${totAp?` menos aportes <b>${fmt(totAp)}</b>`:''} dá um líquido de <b>${fmt(total)}</b> — dividido igualmente entre ${acum.length} sócios, <b>${fmt(esper)}</b> para cada.
@@ -2586,23 +2636,36 @@ function editGrupo(id){
   const g = id ? grupos().find(x=>x.id===id) : { id:null, nome:'', empresas:[] };
   if(!g) return toast('Grupo não encontrado.');
   const disp = userEmps();
-  openModal(`<h3>${id?'Editar':'Novo'} grupo de empresas</h3>
-  <div class="fgrid">
-    <label class="full">Nome do grupo<input id="gm-nome" value="${esc(g.nome)}" placeholder="Ex: Grupo Aliance Brasil"></label>
-    <div class="full">
-      <div style="font-size:11px;color:var(--mut);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Empresas do grupo</div>
-      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px;padding:8px">
-        ${disp.map(e=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:13px;color:var(--tx)">
-          <input type="checkbox" class="gm-emp" value="${e.id}" ${(g.empresas||[]).includes(e.id)?'checked':''} style="width:auto"> ${esc(e.nome)}
-        </label>`).join('')}
+  openModal(`
+  <div class="mhead">
+    <h3>${id?'Editar':'Novo'} grupo de empresas</h3>
+    <p class="sm-t mut" style="margin:0">Cada empresa pertence a <b>um grupo só</b>. Painel, relatórios, sócios e retiradas do grupo consideram apenas as empresas marcadas aqui.</p>
+  </div>
+  <div class="mbody">
+    <div class="fsec">
+      <div class="fgrid">
+        <label class="full">Nome do grupo<input id="gm-nome" value="${esc(g.nome)}" placeholder="Ex: Grupo Aliance Brasil"></label>
       </div>
-      <p class="sm-t mut" style="margin:6px 0 0">Só aparecem as empresas às quais você tem acesso.</p>
+    </div>
+    <div class="fsec">
+      <div class="ft">Empresas do grupo</div>
+      <div style="border:1px solid var(--bd);border-radius:7px;padding:6px;background:#fbfcfe">
+        ${disp.map(e=>{
+          const dono = grupos().find(x=>x.id!==id && (x.empresas||[]).includes(e.id));
+          return `<label class="gm-l ${dono?'ocupada':''}">
+            <input type="checkbox" class="gm-emp" value="${e.id}" ${(g.empresas||[]).includes(e.id)?'checked':''} ${dono?'disabled':''}>
+            <span class="gm-n">${esc(e.nome)}</span>
+            ${dono?`<span class="badge b-mut" title="Tire a empresa daquele grupo antes de trazê-la para este">já em: ${esc(dono.nome)}</span>`:''}
+          </label>`;
+        }).join('')}
+      </div>
+      <p class="sm-t mut" style="margin:7px 0 0">Empresas marcadas como <b>já em</b> pertencem a outro grupo e ficam bloqueadas aqui. Só aparecem empresas às quais você tem acesso.</p>
     </div>
   </div>
-  <div class="right">
-    ${id?'<button class="sec" id="gm-del" style="margin-right:auto">🗑️ Excluir grupo</button>':''}
+  <div class="mfoot">
+    ${id?'<button class="sec esq" id="gm-del">🗑️ Excluir grupo</button>':''}
     <button class="sec" onclick="closeModal()">Cancelar</button><button id="gm-save">Salvar</button>
-  </div>`);
+  </div>`, true);
   const del = $('#gm-del');
   if(del) del.onclick = ()=>{
     if(!confirm('Excluir o grupo "'+g.nome+'"? As empresas e seus lançamentos não são afetados.')) return;
@@ -2614,6 +2677,23 @@ function editGrupo(id){
     if(!nome) return alert('Informe o nome do grupo.');
     const sel = [...document.querySelectorAll('.gm-emp')].filter(c=>c.checked).map(c=>+c.value);
     if(sel.length<1) return alert('Selecione ao menos uma empresa.');
+    // trava de servidor-do-cliente: o disabled protege a UI, isto protege o dado
+    const conflito = sel.map(eid=>{
+      const dono = grupos().find(x=>x.id!==id && (x.empresas||[]).includes(eid));
+      return dono ? (ROOT.empresas.find(e=>e.id===eid)||{}).nome+' já está em "'+dono.nome+'"' : null;
+    }).filter(Boolean);
+    if(conflito.length) return alert('Uma empresa não pode estar em dois grupos:\n\n'+conflito.join('\n'));
+    // avisa sobre acertos que ficarão órfãos ao remover uma empresa do grupo
+    if(id){
+      const saindo = (g.empresas||[]).filter(x=>!sel.includes(x));
+      if(saindo.length){
+        const nAj = ((g.ret||{}).ajustes||[]).filter(a=>saindo.includes(a.empId)).length;
+        const nomes = saindo.map(x=>(ROOT.empresas.find(e=>e.id===x)||{}).nome).join(', ');
+        if(!confirm('Você está tirando do grupo: '+nomes+'.\n\n'
+          + (nAj ? nAj+' acerto(s) manual(is) dessa(s) empresa(s) deixarão de contar no placar de retiradas. Eles não são apagados — voltam se a empresa voltar ao grupo.\n\n' : '')
+          + 'Os lançamentos e cadastros das empresas não são afetados. Continuar?')) return;
+      }
+    }
     if(id){ g.nome=nome; g.empresas=sel; }
     else {
       const nid = grupos().reduce((m,x)=>Math.max(m,x.id),0)+1;
@@ -2627,6 +2707,17 @@ function editGrupo(id){
 function bindGrupo(){
   const novo = $('#g-novo'); if(novo) novo.onclick = ()=>editGrupo(null);
   const ed   = $('#g-edit'); if(ed)   ed.onclick   = ()=>editGrupo(GF.gid);
+  const orf  = $('#g-orfas');
+  if(orf) orf.onclick = ()=>{
+    const fora = empresasSemGrupo();
+    if(!fora.length) return;
+    // já abre o modal com elas marcadas e um nome sugerido
+    const nid = grupos().reduce((m,x)=>Math.max(m,x.id),0)+1;
+    grupos().push({ id:nid, nome: fora.length===1 ? fora[0].nome : 'Novo grupo',
+                    empresas: fora.map(e=>e.id), criadoPor:(USER&&USER.id)||null });
+    GF.gid = nid; save(); render(); editGrupo(nid);
+    toast('Grupo criado. Ajuste o nome e as empresas.');
+  };
   const sel  = $('#g-sel');  if(sel)  sel.onchange = e=>{ GF.gid=+e.target.value; GF.lim=200; render(); };
   ['g-de','g-ate'].forEach((id,i)=>{ const el=$('#'+id); if(el) el.onchange = e=>{ GF[i?'ate':'de']=e.target.value; GF.lim=200; render(); }; });
   bindPeriodBtns('gf', r=>{ GF.de=r.de; GF.ate=r.ate; GF.lim=200; render(); });
@@ -4705,12 +4796,14 @@ function vAdm(){
       ${ed?'<button onclick="cadEmp(null)">+ Nova empresa</button>':'<span class="badge b-mut">🔒 somente leitura</span>'}
     </div>
     <div class="panel"><table>
-      <tr><th>Nome</th><th>Tema</th><th>CNPJ</th><th class="r">Lançamentos</th><th class="r">Contas</th><th>Usuários</th><th></th></tr>
+      <tr><th>Nome</th><th>Grupo</th><th>Tema</th><th>CNPJ</th><th class="r">Lançamentos</th><th class="r">Contas</th><th>Usuários</th><th></th></tr>
       ${ROOT.empresas.map(e=>{
         const usrs=ROOT.usuarios.filter(u=>!u.empresas||u.empresas.length===0||u.empresas.includes(e.id));
         const t=temaDe(e);
+        const gr=grupoDaEmpresa(e.id);
         return `<tr>
           <td>${esc(e.nome)} ${e.id===ROOT.empAtual?'<span class="badge b-ok">atual</span>':''}</td>
+          <td class="sm-t">${gr?`<span class="badge b-acc">${esc(gr.nome)}</span>`:'<span class="badge b-warn" title="Não aparece em nenhuma Visão de Grupo e não tem controle de retiradas">sem grupo</span>'}</td>
           <td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:34px;height:16px;border-radius:4px;background:linear-gradient(90deg,${t.side} 50%,${t.acc} 50%);box-shadow:0 0 0 1px var(--bd)"></span><span class="sm-t mut">${t.nome}</span></span></td>
           <td class="sm-t mut">${esc(e.cnpj||'—')}</td>
           <td class="r">${e.db.lancs.length}</td>
