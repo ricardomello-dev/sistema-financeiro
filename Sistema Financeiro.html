@@ -5046,15 +5046,20 @@ let STRUCT_PREVIEW = null; // { empId, planos, ccustos, resumo }
 
 function vAIStructPanel(){
   if(!USER || (!USER.admin && !hasPerm('adm'))) return '';
-  const emps = ROOT.empresas.map(e=>`<option value="${e.id}">${esc(e.nome)}</option>`).join('');
+  /* O select PRECISA vir na empresa ativa. Sem o selected ele caía sempre na
+     primeira empresa da lista, e a pessoa configurava uma empresa achando que
+     estava configurando outra — foi assim que a RVR levou uma estrutura de
+     agência em 06/09/2026, com 2251 lançamentos perdendo a classificação. */
+  const emps = ROOT.empresas.map(e=>`<option value="${e.id}" ${e.id===ROOT.empAtual?'selected':''}>${esc(e.nome)}</option>`).join('');
   return `
   <div class="panel" style="border-left:4px solid var(--acc)">
     <h3 style="margin-top:0">⚙️ Configurar Empresa por IA <span class="badge b-acc" style="font-size:10px;vertical-align:middle">ADMIN</span></h3>
     <p class="sm-t mut" style="margin-bottom:12px">Descreva o tipo de negócio da empresa e o Assistente criará automaticamente o <b>Plano de Contas</b> e os <b>Centros de Custo</b> adequados. Apenas administradores têm acesso a esta função.</p>
     <div class="fgrid" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
       <label>Empresa<select id="st-emp">${emps}</select></label>
-      <label style="display:flex;align-items:flex-end"><span class="sm-t mut">A estrutura criada substituirá planos e centros de custo existentes</span></label>
+      <label style="display:flex;align-items:flex-end"><span class="sm-t mut">Ao aplicar você escolhe entre <b>acrescentar</b> ao que já existe ou <b>substituir</b> tudo.</span></label>
     </div>
+    <div id="st-risco" class="rl-aviso amb" style="display:none;margin-bottom:10px"></div>
     <label style="display:block;margin-bottom:10px">Descreva o negócio da empresa
       <textarea id="st-desc" rows="3" style="width:100%;margin-top:4px;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--bd);border-radius:6px;resize:vertical" placeholder="Ex: Empresa de logística e transporte de cargas, com frota própria de 30 caminhões. Atende clientes industriais e do agronegócio em todo o Brasil. Possui filial em SP e MG..."></textarea>
     </label>
@@ -5077,10 +5082,12 @@ function vAIStructPanel(){
           <div id="st-cc-list" style="margin-top:6px;font-size:12px;line-height:1.8"></div>
         </div>
       </div>
-      <div style="display:flex;gap:8px">
-        <button id="st-apply" style="background:#27ae60;color:#fff">✅ Aplicar ao sistema</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="st-add" style="background:#27ae60;color:#fff">➕ Acrescentar ao que já existe</button>
+        <button class="sec" id="st-apply">♻️ Substituir tudo</button>
         <button class="sec" id="st-discard">Descartar</button>
       </div>
+      <p class="sm-t mut" style="margin:8px 0 0"><b>Acrescentar</b> mantém as categorias atuais e cria só o que falta — nenhum lançamento perde a classificação. <b>Substituir</b> apaga as categorias atuais; use apenas em empresa sem lançamentos.</p>
     </div>
   </div>`;
 }
@@ -5109,6 +5116,9 @@ function bindStructPanel(){
       const desc = $('#st-desc').value.trim();
       const empId = +$('#st-emp').value;
       if(!desc){ toast('Descreva o negócio da empresa antes de gerar.'); return; }
+      const alvo = ROOT.empresas.find(e=>e.id===empId);
+      if(alvo && alvo.id !== ROOT.empAtual &&
+         !confirm(`Atenção: você está com "${empAtual().nome}" aberta, mas a estrutura será gerada para "${alvo.nome}".\n\nContinuar assim mesmo?`)) return;
       const st = $('#st-status'), prev = $('#st-preview');
       st.textContent = '🤖 Gerando estrutura…'; stGen.disabled=true; prev.style.display='none';
       try{
@@ -5141,6 +5151,15 @@ REGRAS:
         const data = JSON.parse(m[0]);
         if(!data.planos||!data.ccustos) throw new Error('JSON incompleto.');
         STRUCT_PREVIEW = { empId, planos: data.planos, ccustos: data.ccustos, resumo: data.resumo||'' };
+        // quantos lançamentos perderiam a classificação se isso substituísse tudo
+        const dbA = empDB(alvo), nl = (dbA.lancs||[]).length;
+        const risco = $('#st-risco');
+        risco.style.display = 'block';
+        risco.innerHTML = nl
+          ? `⚠️ <b>${esc(alvo.nome)}</b> tem <b>${nl} lançamento(s)</b> classificados nas categorias atuais (${(dbA.planos||[]).length} planos, ${(dbA.ccustos||[]).length} centros).
+             Se você <b>substituir</b>, todos os ${nl} ficam sem plano de conta e sem centro de custo — e não há como reverter sem restaurar backup.
+             Use <b>Acrescentar</b>, que mantém o que existe.`
+          : `✅ <b>${esc(alvo.nome)}</b> ainda não tem lançamentos, então substituir aqui é seguro.`;
         $('#st-resumo').textContent = data.resumo||'';
         $('#st-pl-list').innerHTML = data.planos.map(p=>`<div><span class="badge ${p.tipo==='R'?'b-ok':'b-warn'}" style="font-size:10px">${p.tipo==='R'?'R':'D'}</span> ${esc(p.nome)}</div>`).join('');
         $('#st-cc-list').innerHTML = data.ccustos.map(c=>`<div>📌 ${esc(c.nome)}</div>`).join('');
@@ -5149,26 +5168,61 @@ REGRAS:
       stGen.disabled=false;
     };
 
+    /* ACRESCENTAR — rota segura e padrão. Mantém tudo que existe e cria só o
+       que falta, então nenhum lançamento perde a classificação. */
+    const stAdd = $('#st-add');
+    if(stAdd) stAdd.onclick = ()=>{
+      if(!podeEditar()) return bloqueado();
+      if(!STRUCT_PREVIEW) return;
+      const emp = ROOT.empresas.find(e=>e.id===STRUCT_PREVIEW.empId);
+      if(!emp){ toast('Empresa não encontrada.'); return; }
+      const db = empDB(emp);
+      if(!db.planos)  db.planos  = [];
+      if(!db.ccustos) db.ccustos = [];
+      const temPl = new Set(db.planos.map(p=>norm(p.nome)));
+      const temCc = new Set(db.ccustos.map(c=>norm(c.nome)));
+      const novosPl = STRUCT_PREVIEW.planos.filter(p=>p.nome && !temPl.has(norm(p.nome)));
+      const novosCc = STRUCT_PREVIEW.ccustos.filter(c=>c.nome && !temCc.has(norm(c.nome)));
+      if(!novosPl.length && !novosCc.length) return alert('Tudo que a IA sugeriu já existe nessa empresa. Nada a acrescentar.');
+      if(!confirm(`Acrescentar ${novosPl.length} plano(s) de conta e ${novosCc.length} centro(s) de custo à empresa "${emp.nome}"?\n\nNada será apagado e nenhum lançamento é afetado.`)) return;
+      // ids próprios: os que a IA inventou podem colidir com os que já existem
+      novosPl.forEach(p=>db.planos.push({ id:nextCadId(db.planos), nome:p.nome, tipo:(p.tipo==='R'||p.tipo==='T')?p.tipo:'D' }));
+      novosCc.forEach(c=>db.ccustos.push({ id:nextCadId(db.ccustos), nome:c.nome }));
+      STRUCT_PREVIEW = null;
+      save(); render();
+      toast(`✅ ${novosPl.length} plano(s) e ${novosCc.length} centro(s) acrescentados a "${emp.nome}".`);
+    };
+
+    /* SUBSTITUIR — rota destrutiva. Só passa se a pessoa digitar o nome da
+       empresa, e o texto diz o número exato de lançamentos que perdem a
+       classificação. Confirm genérico não segura ninguém com pressa. */
     const stApply = $('#st-apply');
     if(stApply) stApply.onclick = ()=>{
       if(!podeEditar()) return bloqueado();
       if(!STRUCT_PREVIEW) return;
       const emp = ROOT.empresas.find(e=>e.id===STRUCT_PREVIEW.empId);
       if(!emp){ toast('Empresa não encontrada.'); return; }
-      const n = emp.nome;
-      if(!confirm(`Aplicar ${STRUCT_PREVIEW.planos.length} planos de conta e ${STRUCT_PREVIEW.ccustos.length} centros de custo à empresa "${n}"?\n\nOs planos e centros de custo existentes serão SUBSTITUÍDOS.`)) return;
+      const n = emp.nome, db = empDB(emp), nl = (db.lancs||[]).length;
+      if(nl){
+        const resp = prompt(
+          `ATENÇÃO — isto apaga as categorias atuais de "${n}".\n\n` +
+          `${nl} lançamento(s) ficarão SEM plano de conta e SEM centro de custo, e só dá para voltar restaurando backup.\n\n` +
+          `Se é isso mesmo que você quer, digite o nome da empresa abaixo:\n${n}`);
+        if(resp === null) return;
+        if(norm(resp) !== norm(n)) return alert('O nome não confere. Nada foi alterado.');
+      } else if(!confirm(`Aplicar ${STRUCT_PREVIEW.planos.length} planos e ${STRUCT_PREVIEW.ccustos.length} centros a "${n}"?\n\nA empresa não tem lançamentos, então é seguro.`)) return;
       const np = STRUCT_PREVIEW.planos.length, nc = STRUCT_PREVIEW.ccustos.length;
-      emp.db.planos = STRUCT_PREVIEW.planos;
-      emp.db.ccustos = STRUCT_PREVIEW.ccustos;
-      if(!emp.db.nextId || emp.db.nextId < 8000) emp.db.nextId = 8000;
+      db.planos  = STRUCT_PREVIEW.planos.map(p=>({ id:p.id, nome:p.nome, tipo:(p.tipo==='R'||p.tipo==='T')?p.tipo:'D' }));
+      db.ccustos = STRUCT_PREVIEW.ccustos.map(c=>({ id:c.id, nome:c.nome }));
+      if(!db.nextId || db.nextId < 8000) db.nextId = 8000;
       STRUCT_PREVIEW = null;
-      save();
-      toast(`✅ Estrutura aplicada à empresa "${n}": ${np} planos + ${nc} centros de custo`);
-      render();
+      save(); render();
+      toast(`Estrutura substituída em "${n}": ${np} planos + ${nc} centros.`);
     };
 
     const stDiscard = $('#st-discard');
-    if(stDiscard) stDiscard.onclick = ()=>{ STRUCT_PREVIEW=null; $('#st-preview').style.display='none'; $('#st-status').textContent=''; };
+    if(stDiscard) stDiscard.onclick = ()=>{ STRUCT_PREVIEW=null; $('#st-preview').style.display='none';
+      $('#st-status').textContent=''; const r=$('#st-risco'); if(r) r.style.display='none'; };
   }
 }
 
