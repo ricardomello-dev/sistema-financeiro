@@ -3893,8 +3893,15 @@ function vCad(){
   const ed = podeEditar();
   const btnNovo = (fn)=> ed ? `<button class="sm" onclick="${fn}">+ Novo</button>` : '';
   const acoes = (cadFn, delFn)=> ed ? `<button class="sm sec" onclick="${cadFn}">✏️</button> <button class="sm sec" onclick="${delFn}">🗑️</button>` : '';
+  const vazio = DB.planos.length < 3 && DB.ccustos.length < 3;
   return `<h2>🗂️ Contas e Categorias</h2>
   ${ed?'':'<div class="panel" style="border-left:4px solid var(--warn);padding:10px 14px"><span class="sm-t">🔒 Seu perfil é somente leitura — os cadastros podem ser consultados, mas não alterados.</span></div>'}
+  ${ed?`<div class="toolbar">
+    <button class="${vazio?'':'sec'}" onclick="impEstrutura()">📋 Importar estrutura pronta</button>
+    <span class="mut sm-t">${vazio
+      ? 'Esta empresa quase não tem categorias. Comece por um modelo do ramo e ajuste depois — é mais rápido do que criar uma a uma.'
+      : 'Traz um plano de contas e centros de custo completos do ramo. O que já existe é ignorado.'}</span>
+  </div>`:''}
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
     <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Contas bancárias ${btnNovo('cadConta(null)')}</h3>
       <table><tr><th>Nome</th>${verSaldos()?'<th class="r">Saldo inicial</th><th class="r">Saldo atual</th>':''}<th></th></tr>
@@ -3912,7 +3919,7 @@ function vCad(){
       <table><tr><th>Nome</th><th class="r">Usos</th><th></th></tr>
       ${DB.ccustos.map(c=>`<tr><td>${esc(c.nome)}</td><td class="r">${usoCC(c.id)}</td>
       <td style="white-space:nowrap">${acoes(`cadCC(${c.id})`,`delCC(${c.id})`)}</td></tr>`).join('')}</table>
-      <p class="mut sm-t" style="margin-top:8px">Cada obra = um centro de custo.</p></div>
+      <p class="mut sm-t" style="margin-top:8px">Numa construtora, cada obra é um centro. Numa agência, cada área.</p></div>
   </div>
   <div class="panel" style="margin-top:18px">
     <h3 style="margin-top:0">👥 Favorecidos / Fornecedores</h3>
@@ -3921,6 +3928,219 @@ function vCad(){
   </div>
 `;
 }
+/* ══════════════════════════════════════════════════════════════════
+   MODELOS DE ESTRUTURA (plano de contas + centros de custo)
+   Cadastrar 50 contas uma a uma é inviável. Estes modelos partem de
+   estruturas reais do ramo; a ideia é importar e depois podar o que
+   não se usa, que é bem mais rápido do que criar do zero.
+   ═════════════════════════════════════════════════════════════════ */
+const MODELOS_ESTRUTURA = {
+  agencia: {
+    nome: 'Agência de marketing digital',
+    dica: 'Centros de custo por área interna. O repasse de mídia fica separado da receita própria, senão o faturamento aparece inflado.',
+    cc: ['Atendimento e Planejamento','Criação','Mídia Paga','Produção Audiovisual',
+         'Social Media e Conteúdo','Tecnologia e Web','Comercial','Administrativo',
+         'Repasse de Mídia (cliente)'],
+    pl: [
+      ['R','RECEITAS:Fee mensal (contrato)'],
+      ['R','RECEITAS:Projeto ou campanha pontual'],
+      ['R','RECEITAS:Produção audiovisual'],
+      ['R','RECEITAS:Gestão de mídia (taxa)'],
+      ['R','RECEITAS:Consultoria e estratégia'],
+      ['R','RECEITAS:Desenvolvimento web'],
+      ['R','RECEITAS:Reembolso de despesas do cliente'],
+      ['R','REPASSE DE MIDIA:Verba recebida do cliente'],
+      ['R','FINANCEIRO:Rendimento de aplicação'],
+      ['R','FINANCEIRO:Outras receitas'],
+      ['R','SOCIOS:Aporte'],
+      ['R','SOCIOS:Devolução de adiantamento'],
+
+      ['D','CUSTO DIRETO:Freelancer de criação'],
+      ['D','CUSTO DIRETO:Freelancer de audiovisual'],
+      ['D','CUSTO DIRETO:Locação de equipamento'],
+      ['D','CUSTO DIRETO:Estúdio e locação de espaço'],
+      ['D','CUSTO DIRETO:Elenco, modelo e locução'],
+      ['D','CUSTO DIRETO:Banco de imagem, trilha e fonte'],
+      ['D','CUSTO DIRETO:Impressão e material gráfico'],
+      ['D','CUSTO DIRETO:Viagem e diária de produção'],
+
+      ['D','REPASSE DE MIDIA:Meta Ads'],
+      ['D','REPASSE DE MIDIA:Google Ads'],
+      ['D','REPASSE DE MIDIA:TikTok, LinkedIn e outras'],
+      ['D','REPASSE DE MIDIA:Influenciadores'],
+      ['D','REPASSE DE MIDIA:Mídia offline'],
+
+      ['D','PESSOAL:Salários'],
+      ['D','PESSOAL:Encargos (FGTS e INSS)'],
+      ['D','PESSOAL:13º e férias'],
+      ['D','PESSOAL:Benefícios (VT, VR, saúde)'],
+      ['D','PESSOAL:Estagiário e aprendiz'],
+      ['D','PESSOAL:Treinamento e cursos'],
+
+      ['D','FERRAMENTAS:Criação (Adobe, Figma, Canva)'],
+      ['D','FERRAMENTAS:Automação e CRM'],
+      ['D','FERRAMENTAS:Analytics e SEO'],
+      ['D','FERRAMENTAS:Gestão de projetos'],
+      ['D','FERRAMENTAS:IA e produtividade'],
+      ['D','FERRAMENTAS:Hospedagem, domínio e nuvem'],
+
+      ['D','COMERCIAL:Mídia paga da própria agência'],
+      ['D','COMERCIAL:Evento, feira e patrocínio'],
+      ['D','COMERCIAL:Comissão de vendas'],
+      ['D','COMERCIAL:Brinde e material institucional'],
+
+      ['D','ADMINISTRATIVO:Aluguel e condomínio'],
+      ['D','ADMINISTRATIVO:Energia, água e limpeza'],
+      ['D','ADMINISTRATIVO:Internet e telefonia'],
+      ['D','ADMINISTRATIVO:Contabilidade'],
+      ['D','ADMINISTRATIVO:Jurídico'],
+      ['D','ADMINISTRATIVO:Material de escritório'],
+      ['D','ADMINISTRATIVO:Seguros'],
+      ['D','ADMINISTRATIVO:Equipamento e manutenção de TI'],
+
+      ['D','IMPOSTOS:Simples Nacional (DAS)'],
+      ['D','IMPOSTOS:ISS'],
+      ['D','IMPOSTOS:IRPJ e CSLL'],
+      ['D','IMPOSTOS:PIS e COFINS'],
+      ['D','IMPOSTOS:Taxas e alvarás'],
+
+      ['D','FINANCEIRO:Tarifa bancária'],
+      ['D','FINANCEIRO:Taxa de cartão e gateway'],
+      ['D','FINANCEIRO:Juros e multas'],
+      ['D','FINANCEIRO:Juros de empréstimo'],
+
+      ['D','SOCIOS:Pró-labore'],
+      ['D','SOCIOS:Distribuição de lucros'],
+      ['D','SOCIOS:Adiantamento (retirada)'],
+
+      ['T','TRANSFERENCIAS:Entre contas próprias'],
+      ['T','TRANSFERENCIAS:Aplicação'],
+      ['T','TRANSFERENCIAS:Resgate de aplicação'],
+    ]
+  },
+  construtora: {
+    nome: 'Construtora e incorporadora',
+    dica: 'Centros de custo por obra. Cada obra vira um centro, e o plano separa as etapas.',
+    cc: ['Administrativo','Comercial'],
+    pl: [
+      ['R','RECEITAS:Venda de imóvel'],
+      ['R','RECEITAS:Prestação de serviço'],
+      ['R','RECEITAS:Locação'],
+      ['R','FINANCEIRO:Rendimento de aplicação'],
+      ['R','SOCIOS:Aporte'],
+      ['R','SOCIOS:Devolução de adiantamento'],
+      ['D','OBRAS:Material de construção'],
+      ['D','OBRAS:Mão de obra'],
+      ['D','OBRAS:Locação de equipamento'],
+      ['D','OBRAS:Projeto'],
+      ['D','OBRAS:Legalização da obra'],
+      ['D','OBRAS:Limpeza e preparação do solo'],
+      ['D','OBRAS:Ferramentas'],
+      ['D','OBRAS:Alojamento'],
+      ['D','OBRAS:Mobília e decoração'],
+      ['D','IMOVEIS:Legalização'],
+      ['D','PESSOAL:Salários'],
+      ['D','PESSOAL:Encargos (FGTS e INSS)'],
+      ['D','PESSOAL:Benefícios'],
+      ['D','IMPOSTOS:Simples Nacional (DAS)'],
+      ['D','IMPOSTOS:IPTU'],
+      ['D','ADMINISTRATIVO:Contabilidade'],
+      ['D','ADMINISTRATIVO:Energia, água e internet'],
+      ['D','ADMINISTRATIVO:Material de escritório'],
+      ['D','FINANCEIRO:Tarifa bancária'],
+      ['D','FINANCEIRO:Juros e multas'],
+      ['D','SOCIOS:Pró-labore'],
+      ['D','SOCIOS:Distribuição de lucros'],
+      ['D','SOCIOS:Adiantamento (retirada)'],
+      ['T','TRANSFERENCIAS:Entre contas próprias'],
+    ]
+  }
+};
+/* Converte o texto do modal em lista [tipo, nome]. Aceita "R | NOME",
+   "R;NOME" e "R NOME" — as três formas que a pessoa tende a digitar. */
+function parseEstrutura(txt){
+  const out = [];
+  for(let ln of String(txt||'').split('\n')){
+    ln = ln.trim(); if(!ln || ln.startsWith('#')) continue;
+    let tipo = 'D', nome = ln;
+    const m = ln.match(/^([RDT])\s*[|;,\t]\s*(.+)$/i) || ln.match(/^([RDT])\s+(.+)$/i);
+    if(m){ tipo = m[1].toUpperCase(); nome = m[2].trim(); }
+    if(nome) out.push([tipo, nome]);
+  }
+  return out;
+}
+window.impEstrutura = function(){
+  if(!podeEditar()) return bloqueado();
+  let mod = 'agencia';
+  const txtPl = m => MODELOS_ESTRUTURA[m].pl.map(([t,n])=>t+' | '+n).join('\n');
+  const txtCc = m => MODELOS_ESTRUTURA[m].cc.join('\n');
+
+  const previa = ()=>{
+    const pl = parseEstrutura($('#ie-pl').value);
+    const cc = parseEstrutura($('#ie-cc').value);
+    const jaPl = new Set(DB.planos.map(p=>norm(p.nome)));
+    const jaCc = new Set(DB.ccustos.map(c=>norm(c.nome)));
+    const novosPl = pl.filter(([,n])=>!jaPl.has(norm(n)));
+    const novosCc = cc.filter(([,n])=>!jaCc.has(norm(n)));
+    $('#ie-prev').innerHTML =
+      `Serão criados <b>${novosPl.length}</b> plano(s) de conta e <b>${novosCc.length}</b> centro(s) de custo.` +
+      ((pl.length-novosPl.length)+(cc.length-novosCc.length)
+        ? ` <span class="mut">${(pl.length-novosPl.length)+(cc.length-novosCc.length)} já existem e serão ignorados.</span>` : '');
+    return { novosPl, novosCc };
+  };
+
+  openModal(`
+  <div class="mhead">
+    <h3>📋 Importar estrutura de contas</h3>
+    <p class="sm-t mut" style="margin:0">Cria de uma vez o plano de contas e os centros de custo. <b>Nada é apagado</b> — o que já existe com o mesmo nome é ignorado.</p>
+  </div>
+  <div class="mbody">
+    <div class="fsec">
+      <div class="ft">Modelo de partida</div>
+      <div class="rl-seg" id="ie-mod">
+        ${Object.entries(MODELOS_ESTRUTURA).map(([k,v])=>`<button type="button" data-m="${k}" class="${k===mod?'on':''}">${esc(v.nome)}</button>`).join('')}
+      </div>
+      <p class="sm-t mut" id="ie-dica" style="margin:9px 0 0">${esc(MODELOS_ESTRUTURA[mod].dica)}</p>
+    </div>
+    <div class="fsec">
+      <div class="ft">Plano de contas</div>
+      <p class="sm-t mut" style="margin:0 0 6px">Uma por linha, no formato <b>TIPO | NOME</b>. Tipo é <b>R</b> receita, <b>D</b> despesa ou <b>T</b> transferência. Use <b>:</b> para hierarquia — <code>RECEITAS:Fee mensal</code> agrupa sozinho.</p>
+      <textarea id="ie-pl" rows="12" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.55">${esc(txtPl(mod))}</textarea>
+    </div>
+    <div class="fsec">
+      <div class="ft">Centros de custo</div>
+      <p class="sm-t mut" style="margin:0 0 6px">Um por linha, só o nome.</p>
+      <textarea id="ie-cc" rows="7" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.55">${esc(txtCc(mod))}</textarea>
+    </div>
+  </div>
+  <div class="mfoot">
+    <span class="sm-t esq" id="ie-prev"></span>
+    <button class="sec" onclick="closeModal()">Cancelar</button><button id="ie-ok">Importar</button>
+  </div>`, true, 'modal-lg');
+
+  $('#ie-mod').querySelectorAll('[data-m]').forEach(b=>b.onclick = ()=>{
+    mod = b.dataset.m;
+    $('#ie-mod').querySelectorAll('[data-m]').forEach(x=>x.classList.toggle('on', x.dataset.m===mod));
+    $('#ie-dica').textContent = MODELOS_ESTRUTURA[mod].dica;
+    $('#ie-pl').value = txtPl(mod);
+    $('#ie-cc').value = txtCc(mod);
+    previa();
+  });
+  $('#ie-pl').oninput = previa;
+  $('#ie-cc').oninput = previa;
+  previa();
+
+  $('#ie-ok').onclick = ()=>{
+    const { novosPl, novosCc } = previa();
+    if(!novosPl.length && !novosCc.length) return alert('Nada novo para importar — tudo que está na lista já existe.');
+    if(!confirm(`Criar ${novosPl.length} plano(s) de conta e ${novosCc.length} centro(s) de custo em ${empAtual().nome}?`)) return;
+    novosPl.forEach(([t,n])=>DB.planos.push({ id:nextCadId(DB.planos), nome:n, tipo:t }));
+    novosCc.forEach(([,n])=>DB.ccustos.push({ id:nextCadId(DB.ccustos), nome:n }));
+    save(); closeModal(); render();
+    toast(`${novosPl.length} plano(s) e ${novosCc.length} centro(s) criados.`);
+  };
+};
+
 window.goFavs = function(){
   VIEW='favs';
   document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on', x.dataset.v==='favs'));
