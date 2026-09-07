@@ -52,11 +52,30 @@ echo ""
 read -r -p "Restaurar este backup por cima dos dados atuais? (digite SIM): " OK
 [ "$OK" = "SIM" ] || { echo "Cancelado. Nada foi alterado."; exit 0; }
 
-cp "$DB" "$DB.antes-da-restauracao" 2>/dev/null && echo "Banco atual guardado em $DB.antes-da-restauracao"
-pm2 stop sistema-financeiro >/dev/null 2>&1
+# Guarda o estado atual com data e hora — se a restauracao for a escolha
+# errada, este arquivo e o unico caminho de volta.
+SALVO="$DB.antes-da-restauracao-$(date +%Y%m%d-%H%M%S)"
+cp "$DB" "$SALVO" 2>/dev/null && echo "Banco ATUAL guardado em: $SALVO"
+
+# ATENCAO: o sistema roda por systemd (servico "finance"), NAO por pm2.
+# Parar de verdade e obrigatorio: com o servico no ar, o processo mantem os
+# dados antigos em memoria e sobrescreve o banco restaurado na proxima
+# gravacao — a restauracao "funciona" e some minutos depois.
+echo "Parando o servico finance..."
+systemctl stop finance
+sleep 2
+if systemctl is-active --quiet finance; then
+  echo "ERRO: o servico finance nao parou. Nada foi alterado."
+  exit 1
+fi
+
 cp "$TMP/sistema.db" "$DB"
-pm2 start sistema-financeiro >/dev/null 2>&1
-sleep 3
+# Remove journal/WAL orfaos do banco antigo, que poderiam reintroduzir dados
+rm -f "$DB-wal" "$DB-shm" 2>/dev/null
+
+echo "Subindo o servico..."
+systemctl start finance
+sleep 4
 
 if curl -s http://localhost:3000/api/status | grep -q '"ok":true'; then
   echo ""
@@ -64,6 +83,9 @@ if curl -s http://localhost:3000/api/status | grep -q '"ok":true'; then
   echo "  #   RESTAURADO. Sistema no ar com os dados de      #"
   echo "  #   $DATA"
   echo "  ####################################################"
+  echo ""
+  echo "  Estado anterior a esta restauracao: $SALVO"
+  echo "  Confira o sistema no navegador ANTES de fechar este terminal."
 else
-  echo "AVISO: o sistema nao respondeu. Rode: pm2 logs sistema-financeiro --lines 20 --nostream"
+  echo "AVISO: o sistema nao respondeu. Rode: journalctl -u finance -n 30 --no-pager"
 fi

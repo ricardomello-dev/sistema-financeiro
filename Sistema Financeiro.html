@@ -164,6 +164,13 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 .tb-lanc .ic{font-size:11px;margin-right:3px}
 .tb-lanc .ic.ok{color:var(--ok)} .tb-lanc .ic.wr{color:var(--warn)} .tb-lanc .ic.ac{color:var(--acc)}
 
+/* Limpeza de categorias sem uso */
+.lc-lista{max-height:320px;overflow-y:auto;border:1px solid var(--bd);border-radius:7px;padding:6px;background:#fbfcfe}
+.lc-i{display:flex;align-items:flex-start;gap:8px;padding:5px 7px;border-radius:5px;font-size:12.5px;color:var(--tx);cursor:pointer}
+.lc-i:hover{background:#eef5ff}
+.lc-i input{width:auto;margin-top:2px;flex-shrink:0}
+.lc-i span{min-width:0;word-break:break-word}
+
 /* Modal de cadastro de sócios — grid que encolhe em vez de estourar */
 .soc-b{border:1px solid var(--bd);border-radius:8px;padding:13px 14px;margin-bottom:12px;background:#fbfcfe}
 .soc-cab{display:grid;grid-template-columns:1fr 160px auto;gap:9px;align-items:end;margin-bottom:12px}
@@ -3898,9 +3905,11 @@ function vCad(){
   ${ed?'':'<div class="panel" style="border-left:4px solid var(--warn);padding:10px 14px"><span class="sm-t">🔒 Seu perfil é somente leitura — os cadastros podem ser consultados, mas não alterados.</span></div>'}
   ${ed?`<div class="toolbar">
     <button class="${vazio?'':'sec'}" onclick="impEstrutura()">📋 Importar estrutura pronta</button>
+    ${(DB.planos.some(p=>!usoPlano(p.id)) || DB.ccustos.some(c=>!usoCC(c.id)))
+      ? '<button class="sec" onclick="limparCategorias()">🧹 Limpar categorias sem uso</button>' : ''}
     <span class="mut sm-t">${vazio
       ? 'Esta empresa quase não tem categorias. Comece por um modelo do ramo e ajuste depois — é mais rápido do que criar uma a uma.'
-      : 'Traz um plano de contas e centros de custo completos do ramo. O que já existe é ignorado.'}</span>
+      : 'Importar só acrescenta: o que já existe é ignorado e nenhum lançamento é alterado.'}</span>
   </div>`:''}
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
     <div class="panel" style="flex:1;min-width:300px"><h3 style="margin-top:0">Contas bancárias ${btnNovo('cadConta(null)')}</h3>
@@ -4134,10 +4143,121 @@ window.impEstrutura = function(){
     const { novosPl, novosCc } = previa();
     if(!novosPl.length && !novosCc.length) return alert('Nada novo para importar — tudo que está na lista já existe.');
     if(!confirm(`Criar ${novosPl.length} plano(s) de conta e ${novosCc.length} centro(s) de custo em ${empAtual().nome}?`)) return;
-    novosPl.forEach(([t,n])=>DB.planos.push({ id:nextCadId(DB.planos), nome:n, tipo:t }));
-    novosCc.forEach(([,n])=>DB.ccustos.push({ id:nextCadId(DB.ccustos), nome:n }));
+    // guarda o lote para permitir desfazer com precisão depois
+    const lote = { ts:Date.now(), modelo:MODELOS_ESTRUTURA[mod].nome, planos:[], ccustos:[] };
+    novosPl.forEach(([t,n])=>{ const id=nextCadId(DB.planos); DB.planos.push({ id, nome:n, tipo:t }); lote.planos.push(id); });
+    novosCc.forEach(([,n])=>{ const id=nextCadId(DB.ccustos); DB.ccustos.push({ id, nome:n }); lote.ccustos.push(id); });
+    if(!Array.isArray(DB.impLog)) DB.impLog = [];
+    DB.impLog.push(lote);
+    if(DB.impLog.length > 10) DB.impLog = DB.impLog.slice(-10);
     save(); closeModal(); render();
     toast(`${novosPl.length} plano(s) e ${novosCc.length} centro(s) criados.`);
+  };
+};
+
+/* ══════════════════════════════════════════════════════════════════
+   LIMPAR CATEGORIAS SEM USO
+   Só lista o que não tem nenhum lançamento — excluir daqui nunca mexe
+   em lançamento, é sempre reversível recriando a categoria.
+   ═════════════════════════════════════════════════════════════════ */
+function nomesDosModelos(){
+  const s = new Set();
+  Object.values(MODELOS_ESTRUTURA).forEach(m=>{
+    m.pl.forEach(([,n])=>s.add(norm(n)));
+    m.cc.forEach(n=>s.add(norm(n)));
+  });
+  return s;
+}
+window.limparCategorias = function(){
+  if(!podeEditar()) return bloqueado();
+  const plLivres = DB.planos.filter(p=>!usoPlano(p.id));
+  const ccLivres = DB.ccustos.filter(c=>!usoCC(c.id));
+  if(!plLivres.length && !ccLivres.length)
+    return alert('Todas as categorias desta empresa já têm lançamentos. Nada a limpar.');
+
+  const doModelo = nomesDosModelos();
+  const log = Array.isArray(DB.impLog) ? DB.impLog : [];
+  const ult = log.length ? log[log.length-1] : null;
+  const dt  = ult ? new Date(ult.ts).toLocaleString('pt-BR') : '';
+
+  const item = (o, tipo, marcado)=>`<label class="lc-i">
+    <input type="checkbox" class="lc-${tipo}" value="${o.id}" ${marcado?'checked':''}>
+    <span>${esc(o.nome)}${o.tipo?` <span class="badge ${o.tipo==='R'?'b-ok':o.tipo==='D'?'b-bad':'b-mut'}">${o.tipo==='R'?'receita':o.tipo==='D'?'despesa':'transf.'}</span>`:''}</span>
+  </label>`;
+
+  openModal(`
+  <div class="mhead">
+    <h3>🧹 Limpar categorias sem uso</h3>
+    <p class="sm-t mut" style="margin:0">Só aparece aqui o que <b>não tem nenhum lançamento</b>. Excluir não altera nem apaga lançamento algum — no pior caso você recria a categoria depois.</p>
+  </div>
+  <div class="mbody">
+    ${ult?`<div class="rl-aviso" style="margin:12px 0">
+      Última importação: <b>${esc(ult.modelo||'modelo')}</b> em ${esc(dt)} — ${ult.planos.length} plano(s) e ${ult.ccustos.length} centro(s).
+      <div style="margin-top:7px;display:flex;gap:7px;flex-wrap:wrap">
+        <button class="sm" id="lc-ult">Marcar só o que veio dessa importação</button>
+        <button class="sm sec" id="lc-nada">Desmarcar tudo</button>
+      </div>
+    </div>`:`<div class="rl-aviso" style="margin:12px 0">
+      Já vêm marcadas as categorias com nome igual ao dos modelos prontos — que são justamente as criadas por uma importação. Confira antes de confirmar.
+      <div style="margin-top:7px"><button class="sm sec" id="lc-nada">Desmarcar tudo</button></div>
+    </div>`}
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
+      <div style="flex:1;min-width:280px">
+        <div class="ft" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);font-weight:600;padding-bottom:6px;border-bottom:1px solid var(--bd);margin-bottom:8px">
+          Planos de conta sem uso (${plLivres.length})</div>
+        <div class="lc-lista">${plLivres.length
+          ? plLivres.map(p=>item(p,'pl', ult ? ult.planos.includes(p.id) : doModelo.has(norm(p.nome)))).join('')
+          : '<span class="sm-t mut">Nenhum — todos estão em uso.</span>'}</div>
+      </div>
+      <div style="flex:1;min-width:250px">
+        <div class="ft" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);font-weight:600;padding-bottom:6px;border-bottom:1px solid var(--bd);margin-bottom:8px">
+          Centros de custo sem uso (${ccLivres.length})</div>
+        <div class="lc-lista">${ccLivres.length
+          ? ccLivres.map(c=>item(c,'cc', ult ? ult.ccustos.includes(c.id) : doModelo.has(norm(c.nome)))).join('')
+          : '<span class="sm-t mut">Nenhum — todos estão em uso.</span>'}</div>
+      </div>
+    </div>
+  </div>
+  <div class="mfoot">
+    <span class="sm-t esq" id="lc-cont"></span>
+    <button class="sec" onclick="closeModal()">Cancelar</button>
+    <button class="bad" id="lc-ok">Excluir marcados</button>
+  </div>`, true, 'modal-lg');
+
+  const conta = ()=>{
+    const n = document.querySelectorAll('.lc-pl:checked').length + document.querySelectorAll('.lc-cc:checked').length;
+    $('#lc-cont').textContent = n ? n+' selecionada(s) para excluir' : 'nada selecionado';
+    $('#lc-ok').disabled = !n;
+    $('#lc-ok').style.opacity = n ? '' : '.5';
+  };
+  document.querySelectorAll('.lc-pl,.lc-cc').forEach(c=>c.onchange = conta);
+  const bn = $('#lc-nada');
+  if(bn) bn.onclick = ()=>{ document.querySelectorAll('.lc-pl,.lc-cc').forEach(c=>c.checked=false); conta(); };
+  const bu = $('#lc-ult');
+  if(bu) bu.onclick = ()=>{
+    document.querySelectorAll('.lc-pl').forEach(c=>c.checked = ult.planos.includes(+c.value));
+    document.querySelectorAll('.lc-cc').forEach(c=>c.checked = ult.ccustos.includes(+c.value));
+    conta();
+  };
+  conta();
+
+  $('#lc-ok').onclick = ()=>{
+    const pl = [...document.querySelectorAll('.lc-pl:checked')].map(c=>+c.value);
+    const cc = [...document.querySelectorAll('.lc-cc:checked')].map(c=>+c.value);
+    if(!pl.length && !cc.length) return;
+    // trava de segurança: se algo passou a ser usado entre abrir e confirmar, aborta
+    const usados = pl.filter(usoPlano).concat(cc.filter(usoCC));
+    if(usados.length) return alert('Alguma categoria passou a ser usada. Feche e abra a tela de novo.');
+    if(!confirm(`Excluir ${pl.length} plano(s) de conta e ${cc.length} centro(s) de custo de ${empAtual().nome}?\n\nNenhum lançamento será afetado.`)) return;
+    DB.planos  = DB.planos.filter(p=>!pl.includes(p.id));
+    DB.ccustos = DB.ccustos.filter(c=>!cc.includes(c.id));
+    if(Array.isArray(DB.impLog))
+      DB.impLog = DB.impLog.map(l=>({ ...l,
+        planos:  l.planos.filter(id=>!pl.includes(id)),
+        ccustos: l.ccustos.filter(id=>!cc.includes(id)) }))
+        .filter(l=>l.planos.length || l.ccustos.length);
+    save(); closeModal(); render();
+    toast(`${pl.length} plano(s) e ${cc.length} centro(s) excluídos.`);
   };
 };
 
