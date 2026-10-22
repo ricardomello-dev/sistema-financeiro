@@ -373,7 +373,7 @@ function aplicarTema(e){
 /* Estado da tela Conta Azul. Declarado aqui, antes de setEmp(), porque
    setEmp roda no boot e um `let` ainda não inicializado lança ReferenceError
    mesmo sob typeof. */
-let CAF = { aba:'resumo', q:'', lim:200 };
+let CAF = { aba:'resumo', q:'', lim:200, de:'', ate:'', ct:'', tol:3 };
 function setEmp(id){
   const allowed = userEmps();
   const e = (USER && !USER.admin && USER.empresas && USER.empresas.length>0)
@@ -381,7 +381,7 @@ function setEmp(id){
     : (ROOT.empresas.find(x=>x.id===id) || ROOT.empresas[0]);
   ROOT.empAtual = e.id; DB = e.db; IDX = null;
   // filtros de tela que são por empresa não podem vazar de uma para outra
-  CAF = { aba:'resumo', q:'', lim:200 };
+  CAF = { aba:'resumo', q:'', lim:200, de:'', ate:'', ct:'', tol:3 };
   aplicarTema(e);
 }
 // DB e ROOT.empAtual são inicializados em bootAsync() via setEmp()
@@ -681,6 +681,43 @@ function decodeOFX(buf){
   else if(/ENCODING[: ]*UNICODE/i.test(ascii)) enc='utf-8';
   try{ return new TextDecoder(enc).decode(buf); }catch(e){ return new TextDecoder('latin1').decode(buf); }
 }
+/* ══════════════════════════════════════════════════════════════════
+   EXTRATO BANCÁRIO ARQUIVADO
+   A conciliação lia o OFX, casava e jogava fora — o único rastro era o
+   fitid no lançamento. Com isso dá para saber se um lançamento passou
+   pelo banco, mas NÃO dá para saber que o banco teve um movimento que
+   ninguém lançou. Como é justamente esse o achado mais caro da
+   auditoria, o extrato passou a ser guardado como fonte própria.
+   Guardamos só o essencial: data, valor, identificador e histórico.
+   ═════════════════════════════════════════════════════════════════ */
+function ofxDB(){
+  if(!DB.ofx) DB.ofx = {};
+  if(!Array.isArray(DB.ofx.imports)) DB.ofx.imports = [];
+  return DB.ofx;
+}
+function ofxTxns(ctId){
+  const L = ofxDB().imports.flatMap(i=>(i.txns||[]).map(t=>({ ...t, ct:i.ct })));
+  return ctId ? L.filter(t=>t.ct===+ctId) : L;
+}
+/* Chave estável de uma transação bancária: o FITID quando o banco manda,
+   senão data+valor, que é o que sobra. */
+function ofxKey(t){ return t.fitid || ('K:'+t.date+':'+t.amount); }
+
+function ofxArquivar(ctId, parsed, arquivo){
+  const o = ofxDB();
+  const jaTem = new Set(ofxTxns(ctId).map(ofxKey));
+  const novas = parsed.txns.filter(t=>!jaTem.has(ofxKey(t)));
+  if(!novas.length) return { novas:0, repetidas:parsed.txns.length };
+  const ds = novas.map(t=>t.date).filter(Boolean).sort();
+  o.imports.push({
+    id: 'ofx_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    ts: new Date().toISOString(), arquivo: arquivo||'', ct: +ctId,
+    de: ds[0]||'', ate: ds[ds.length-1]||'', balance: parsed.balance,
+    txns: novas.map(t=>({ fitid:t.fitid||'', date:t.date, amount:t.amount, memo:(t.memo||'').slice(0,120) }))
+  });
+  return { novas:novas.length, repetidas:parsed.txns.length-novas.length };
+}
+
 function parseOFX(text){
   const out = { txns:[], acct:'', bank:'', balance:null };
   const tag = (src,n)=>{ const m = src.match(new RegExp('<'+n+'>\\s*([^<\\r\\n]*)','i')); return m ? m[1].trim() : ''; };
@@ -3314,8 +3351,13 @@ function bindConc(){
           if(cpM){ o.cpId=cpM.id; if(!o.sug||o.sug.conf<90){ o.pl=cpM.pl; o.cc=cpM.cc; o.fav=cpM.fav||o.fav; o.sug={pl:cpM.pl,cc:cpM.cc,fav:cpM.fav,conf:92,via:'Conta a Pagar',n:1,total:1}; } }
           return o;
         })};
+        // arquiva o extrato como terceira fonte da auditoria (dedup por fitid)
+        const arq = ofxArquivar(ctId, parsed, f && f.name);
+        save();
         render();
-        toast(parsed.txns.length+' transações lidas.');
+        toast(parsed.txns.length+' transações lidas'
+          + (arq.novas ? ' · '+arq.novas+' arquivadas para auditoria' : '')
+          + (arq.repetidas ? ' · '+arq.repetidas+' já estavam no arquivo' : '') + '.');
       };
       r.readAsArrayBuffer(f);
     };
@@ -4648,7 +4690,19 @@ function caDB(){
   if(!c.depara  || typeof c.depara  !== 'object') c.depara  = {};  // categoriaCA -> planoId
   if(!c.deparaAuto || typeof c.deparaAuto !== 'object') c.deparaAuto = {}; // quais vieram de palpite
   if(!c.regras  || typeof c.regras  !== 'object') c.regras  = {};  // chaveFav   -> {cat, cc, n}
+  if(!c.deparaConta || typeof c.deparaConta !== 'object') c.deparaConta = {}; // "CONTA CORRENTE - ITAU" -> ctId
   return c;
+}
+/* Contas bancárias citadas pelo Conta Azul nos lotes importados */
+function caContas(){
+  const m = {};
+  for(const l of caLancs()) if(l.conta){ m[l.conta] = (m[l.conta]||0)+1; }
+  return m;
+}
+function caContaDe(nomeCA){
+  const id = +caDB().deparaConta[nomeCA];
+  if(!id) return null;
+  return DB.contas.find(c=>c.id===id) || null;
 }
 /* Todos os lançamentos do CA já importados, de todos os lotes */
 function caLancs(){ return caDB().imports.flatMap(l=>l.lancs||[]); }
@@ -4883,6 +4937,97 @@ function caQualidade(cat){
            pct: vTot ? (vSusp/vTot*100) : 0 };
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   AUDITORIA DE TRÊS VIAS — banco × sistema × Conta Azul
+
+   Casamento em cascata, do mais confiável para o mais frouxo:
+     1. valor exato + mesma data
+     2. valor exato + data dentro da tolerância (regime de caixa vs
+        competência faz a mesma despesa cair em dias diferentes)
+   Cada registro só casa uma vez. O que sobra de cada lado é o achado.
+   ═════════════════════════════════════════════════════════════════ */
+function caCasar(A, B, tol){
+  const livresB = B.map((b,i)=>({ b, i, usado:false }));
+  const pares = [], soA = [];
+  const dias = (x,y)=>Math.abs((new Date(x)-new Date(y))/864e5);
+  for(const a of A){
+    let achou = null;
+    for(const passo of [0, tol]){
+      achou = livresB.find(x=>!x.usado && Math.abs(x.b.v - a.v) < 0.005 &&
+                              a.data && x.b.data && dias(a.data, x.b.data) <= passo);
+      if(achou) break;
+    }
+    if(achou){ achou.usado = true; pares.push({ a, b:achou.b }); }
+    else soA.push(a);
+  }
+  return { pares, soA, soB: livresB.filter(x=>!x.usado).map(x=>x.b) };
+}
+
+function caAuditar(de, ate, ctId, tol){
+  tol = tol==null ? 3 : tol;
+  const noPer = d => d && (!de || d >= de) && (!ate || d <= ate);
+  const c = caDB();
+
+  // lado BANCO — extrato arquivado da conta escolhida
+  const banco = ofxTxns(ctId).filter(t=>noPer(t.date))
+    .map(t=>({ fonte:'banco', data:t.date, v:t.amount, desc:t.memo||'', ref:t }));
+
+  // lado SISTEMA — lançamentos da conta, fora as contas que não movimentam dinheiro
+  const sist = DB.lancs.filter(l=>noPer(l.data) && (!ctId || l.ct===+ctId) && !ctNaoCaixa(DB, l.ct))
+    .map(l=>({ fonte:'sistema', data:l.data, v:l.v, desc:(l.fav||'')+' '+(l.hist||''), ref:l }));
+
+  // lado CONTA AZUL — só os lançamentos cuja conta bancária mapeia para a conta escolhida
+  const ca = caLancs().filter(l=>{
+    if(!noPer(l.data)) return false;
+    if(!ctId) return true;
+    const cc = caContaDe(l.conta);
+    return cc ? cc.id === +ctId : false;
+  }).map(l=>({ fonte:'ca', data:l.data, v:l.v, desc:(l.nome||'')+' '+(l.desc||''), ref:l }));
+
+  const bs = caCasar(banco, sist, tol);   // banco × sistema
+  const bc = caCasar(banco, ca,   tol);   // banco × conta azul
+  const comS = new Set(bs.pares.map(p=>p.a.ref));
+  const comC = new Set(bc.pares.map(p=>p.a.ref));
+
+  // cada transação do banco cai em exatamente um dos quatro estados
+  const okTudo  = banco.filter(b=> comS.has(b.ref) &&  comC.has(b.ref));
+  const semCa   = banco.filter(b=> comS.has(b.ref) && !comC.has(b.ref));
+  const semSist = banco.filter(b=>!comS.has(b.ref) &&  comC.has(b.ref));
+  const soBanco = banco.filter(b=>!comS.has(b.ref) && !comC.has(b.ref));
+
+  // o que não tem lastro bancário de nenhum lado, cruzado entre si
+  const resto = caCasar(bs.soB, bc.soB, tol);
+
+  const soma = L => round2(L.reduce((s,x)=>s+Math.abs(x.v||0),0));
+  const achados = [
+    { k:'soBanco', grav:1, rot:'No banco, em lugar nenhum',
+      txt:'Movimento que existe no extrato e não foi lançado nem aqui nem na contabilidade. É o achado mais caro: dinheiro que entrou ou saiu sem registro em parte alguma.',
+      itens: soBanco },
+    { k:'semCa', grav:1, rot:'No banco e aqui, faltando no Conta Azul',
+      txt:'A contabilidade não registrou. Receita assim é risco fiscal; despesa assim é imposto pago a mais.',
+      itens: semCa },
+    { k:'semSist', grav:2, rot:'No banco e no Conta Azul, faltando aqui',
+      txt:'Você ainda não lançou. Seus relatórios e seu saldo estão incompletos.',
+      itens: semSist },
+    { k:'semBanco', grav:2, rot:'Aqui e no Conta Azul, sem lastro no banco',
+      txt:'Os dois registraram, mas o extrato não tem. Pode ser duplicidade, data muito fora da tolerância, ou movimento de outra conta.',
+      itens: resto.pares.map(p=>p.a) },
+    { k:'soSist', grav:3, rot:'Só aqui',
+      txt:'Existe apenas no seu sistema. Confira se não é erro de digitação ou lançamento repetido.',
+      itens: resto.soA },
+    { k:'soCa', grav:3, rot:'Só no Conta Azul',
+      txt:'Existe apenas na contabilidade. Vale perguntar de onde saiu.',
+      itens: resto.soB }
+  ].map(a=>({ ...a, n:a.itens.length, v:soma(a.itens) }));
+
+  // fechamento: os três totais do período
+  const tot = L => round2(L.reduce((s,x)=>s+(x.v||0),0));
+  return { achados, tol, de, ate, ctId,
+    totais: { banco: tot(banco), sist: tot(sist), ca: tot(ca) },
+    contagem: { banco: banco.length, sist: sist.length, ca: ca.length },
+    okTudo: okTudo.length };
+}
+
 /* ── Tela ────────────────────────────────────────────────────────── */
 function vCA(){
   if(!hasPerm('ca')) return '<h2>🔄 Conta Azul</h2><div class="panel"><p>Você não tem permissão para acessar este módulo.</p></div>';
@@ -4898,7 +5043,7 @@ function vCA(){
        :'<p class="sm-t mut">Seu perfil é somente leitura.</p>'}
   </div>`;
 
-  const abas = [['resumo','📊 Resumo'],['cat','🏷️ Categorias'],['depara','🔀 De-para'],
+  const abas = [['resumo','📊 Resumo'],['aud','⚖️ Auditoria'],['cat','🏷️ Categorias'],['depara','🔀 De-para'],
                 ['regras','🧠 Regras aprendidas'],['qual','🔍 Qualidade'],['lanc','📒 Lançamentos']];
   return head + `
   <div class="toolbar">
@@ -4914,6 +5059,7 @@ function vCA(){
 }
 
 function caBody(){
+  if(CAF.aba==='aud')    return caVAuditoria();
   if(CAF.aba==='cat')    return caVCategorias();
   if(CAF.aba==='depara') return caVDepara();
   if(CAF.aba==='regras') return caVRegras();
@@ -4980,6 +5126,88 @@ function caVResumo(){
       </tr>`).join('')}
     </table>
   </div>`;
+}
+
+function caVAuditoria(){
+  const c = caDB();
+  const contasCA = caContas();
+  const semMap = Object.keys(contasCA).filter(k=>!caContaDe(k));
+  const temOfx = ofxTxns().length;
+
+  // período padrão: o que foi importado do Conta Azul
+  if(!CAF.de || !CAF.ate){
+    const ds = caLancs().map(l=>l.data).filter(Boolean).sort();
+    if(ds.length){ CAF.de = CAF.de || ds[0]; CAF.ate = CAF.ate || ds[ds.length-1]; }
+  }
+  const cabeca = `
+  <div class="lanc-top">
+    <div class="lanc-per">
+      <label>De<input type="date" id="au-de" value="${CAF.de||''}"></label>
+      <label>Até<input type="date" id="au-ate" value="${CAF.ate||''}"></label>
+      <label>Conta<select id="au-ct"><option value="">— escolha —</option>${selOpts(contasCaixa(DB), +CAF.ct||'')}</select></label>
+      <label>Tolerância de data<select id="au-tol">
+        ${[0,1,2,3,5,7,10].map(d=>`<option value="${d}" ${(CAF.tol==null?3:CAF.tol)===d?'selected':''}>${d===0?'mesma data':'± '+d+' dia(s)'}</option>`).join('')}
+      </select></label>
+    </div>
+  </div>`;
+
+  if(!temOfx) return cabeca + `<div class="panel">
+    <h3 style="margin-top:0">Falta o extrato do banco</h3>
+    <p>A auditoria compara <b>três</b> fontes. O Conta Azul já está aqui, seus lançamentos também, mas o extrato bancário ainda não foi arquivado.</p>
+    <p class="sm-t mut">Vá em <b>🏦 Conciliação OFX</b>, escolha a conta e carregue o arquivo OFX do banco. A partir de agora todo OFX carregado fica arquivado automaticamente e passa a servir de terceira via.</p>
+    <p class="sm-t mut">Extratos que você conciliou <b>antes</b> desta atualização não foram guardados — para auditar aqueles meses, carregue o OFX de novo. Transações repetidas são ignoradas.</p>
+  </div>`;
+
+  if(semMap.length) return cabeca + `<div class="panel">
+    <h3 style="margin-top:0">Ligue as contas bancárias primeiro</h3>
+    <p>O Conta Azul chama as contas pelo nome dele. Diga qual é qual aqui, senão a auditoria compara contas diferentes e acusa divergência onde não há.</p>
+    <table class="tb-lanc"><tr><th>Conta no Conta Azul</th><th class="r">Lanç.</th><th style="width:45%">Conta aqui</th></tr>
+      ${Object.entries(contasCA).map(([k,n])=>{
+        const cc = caContaDe(k);
+        return `<tr><td><b>${esc(k)}</b></td><td class="r">${n}</td>
+          <td>${podeEditar()?`<select class="ca-dpct" data-cta="${esc(k)}" style="width:100%">
+            <option value="">— não ligada —</option>${selOpts(DB.contas, cc?cc.id:'')}</select>`
+            :(cc?esc(cc.nome):'<span class="mut">—</span>')}</td></tr>`;
+      }).join('')}
+    </table>
+  </div>`;
+
+  if(!CAF.ct) return cabeca + `<div class="panel"><p class="mut">Escolha a conta bancária acima para rodar a auditoria.</p></div>`;
+
+  const a = caAuditar(CAF.de, CAF.ate, +CAF.ct, CAF.tol==null?3:+CAF.tol);
+  const bate = Math.abs(a.totais.banco - a.totais.sist) < 0.005 && Math.abs(a.totais.banco - a.totais.ca) < 0.005;
+  const cor = g => g===1?'neg':(g===2?'':'mut');
+  const ic  = g => g===1?'🔴':(g===2?'🟡':'⚪');
+
+  return cabeca + `
+  <div class="lanc-resumo">
+    <div class="lr"><span class="lb">Banco</span><span class="vl ${a.totais.banco<0?'neg':'pos'}">${fmt(a.totais.banco)}</span><span class="sm-t mut">${a.contagem.banco} movimentos</span></div>
+    <div class="lr"><span class="lb">Seu sistema</span><span class="vl ${a.totais.sist<0?'neg':'pos'}">${fmt(a.totais.sist)}</span><span class="sm-t mut">${a.contagem.sist} lançamentos</span></div>
+    <div class="lr"><span class="lb">Conta Azul</span><span class="vl ${a.totais.ca<0?'neg':'pos'}">${fmt(a.totais.ca)}</span><span class="sm-t mut">${a.contagem.ca} lançamentos</span></div>
+    <div class="lr"><span class="lb">Casados nos três</span><span class="vl pos">${a.okTudo}</span></div>
+  </div>
+  <div class="rl-aviso ${bate?'':'amb'}" style="margin-bottom:14px">
+    ${bate
+      ? '✅ <b>O período fecha.</b> As três fontes somam o mesmo valor. As diferenças abaixo, se houver, se compensam entre si.'
+      : `⚠️ <b>O período não fecha.</b> Banco ${fmt(a.totais.banco)}, sistema ${fmt(a.totais.sist)}, Conta Azul ${fmt(a.totais.ca)}.
+         Diferença do sistema para o banco: <b>${fmt(round2(a.totais.sist-a.totais.banco))}</b>; da contabilidade para o banco: <b>${fmt(round2(a.totais.ca-a.totais.banco))}</b>.`}
+  </div>
+  ${a.achados.filter(x=>x.n).map(x=>`
+  <div class="panel" style="padding:0;overflow:hidden;border-left:4px solid var(--${x.grav===1?'bad':x.grav===2?'warn':'bd'})">
+    <div style="padding:12px 14px;border-bottom:1px solid var(--bd)">
+      <h3 style="margin:0">${ic(x.grav)} ${esc(x.rot)} <span class="sm-t mut" style="font-weight:400">— ${x.n} item(ns), ${fmt(x.v)}</span></h3>
+      <p class="sm-t mut" style="margin:4px 0 0">${esc(x.txt)}</p>
+    </div>
+    <table class="tb-lanc">
+      <tr><th>Data</th><th>Descrição</th><th class="r">Valor</th></tr>
+      ${x.itens.slice(0,100).map(i=>`<tr>
+        <td class="nw">${fmtD(i.data)}</td>
+        <td class="hist" title="${esc(i.desc)}">${esc(i.desc)}</td>
+        <td class="r vlr ${i.v<0?'neg':'pos'}">${fmt(i.v)}</td></tr>`).join('')}
+      ${x.n>100?`<tr><td colspan="3" class="sm-t mut" style="text-align:center">… e mais ${x.n-100}. Use o CSV para ver todos.</td></tr>`:''}
+    </table>
+  </div>`).join('') || `<div class="panel"><p class="pos" style="margin:0"><b>✅ Nenhuma divergência.</b> Banco, sistema e contabilidade contam a mesma história neste período.</p></div>`}
+  <div class="toolbar"><button class="sec" id="au-csv">Exportar divergências em CSV</button></div>`;
 }
 
 function caVCategorias(){
@@ -5164,6 +5392,25 @@ function bindCA(){
   if(q) q.oninput = ev=>{ CAF.q=ev.target.value; CAF.lim=200; clearTimeout(window._caq);
     window._caq = setTimeout(()=>{ render(); const n=$('#ca-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } }, 300); };
   const more = $('#ca-more'); if(more) more.onclick = ()=>{ CAF.lim+=300; render(); };
+
+  // ── auditoria ──
+  [['au-de','de'],['au-ate','ate'],['au-ct','ct'],['au-tol','tol']].forEach(([id,k])=>{
+    const el = $('#'+id); if(el) el.onchange = ev=>{ CAF[k] = ev.target.value; render(); };
+  });
+  document.querySelectorAll('.ca-dpct').forEach(s=>s.onchange = ()=>{
+    const c = caDB(), k = s.dataset.cta;
+    if(s.value) c.deparaConta[k] = +s.value; else delete c.deparaConta[k];
+    save(); render(); toast('Conta ligada.');
+  });
+  const aucsv = $('#au-csv');
+  if(aucsv) aucsv.onclick = ()=>{
+    const a = caAuditar(CAF.de, CAF.ate, +CAF.ct, CAF.tol==null?3:+CAF.tol);
+    const rows = [['Gravidade','Situação','Data','Descrição','Valor']];
+    a.achados.forEach(x=>x.itens.forEach(i=>
+      rows.push([x.grav===1?'Alta':x.grav===2?'Média':'Baixa', x.rot, fmtD(i.data), i.desc, nBR(i.v)])));
+    if(rows.length===1) return alert('Nenhuma divergência para exportar.');
+    dl('auditoria_'+(CAF.de||'')+'_'+(CAF.ate||'')+'.csv', csvOut(rows), 'text/csv');
+  };
 
   // escolha manual sempre vale como confirmada
   document.querySelectorAll('.ca-dp').forEach(s=>s.onchange = ()=>{
