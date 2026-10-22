@@ -291,6 +291,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
       <div class="sec-tit" data-sec="ana">Análise</div>
       <a data-v="rel"   data-sec="ana">📈 Relatórios</a>
       <a data-v="grupo" data-sec="ana">🏢 Visão de Grupo</a>
+      <a data-v="ca"    data-sec="ana">🔄 Conta Azul</a>
       <a data-grp="ai" id="navAiGrp" data-sec="ana">🤖 Assistente <span class="carat" id="aiCarat">▸</span></a>
       <a data-v="ai" class="sub" id="navAiChat" data-sec="ana">💬 Chat</a>
       <a data-v="aicfg" class="sub" id="navAiCfg" data-sec="ana">⚙️ Configuração</a>
@@ -369,12 +370,18 @@ function aplicarTema(e){
   r.setProperty('--side', t.side); r.setProperty('--side2', t.side2);
   r.setProperty('--acc',  t.acc);  r.setProperty('--bg',    t.bg);
 }
+/* Estado da tela Conta Azul. Declarado aqui, antes de setEmp(), porque
+   setEmp roda no boot e um `let` ainda não inicializado lança ReferenceError
+   mesmo sob typeof. */
+let CAF = { aba:'resumo', q:'', lim:200 };
 function setEmp(id){
   const allowed = userEmps();
   const e = (USER && !USER.admin && USER.empresas && USER.empresas.length>0)
     ? (allowed.find(x=>x.id===id) || allowed[0] || ROOT.empresas[0])
     : (ROOT.empresas.find(x=>x.id===id) || ROOT.empresas[0]);
   ROOT.empAtual = e.id; DB = e.db; IDX = null;
+  // filtros de tela que são por empresa não podem vazar de uma para outra
+  CAF = { aba:'resumo', q:'', lim:200 };
   aplicarTema(e);
 }
 // DB e ROOT.empAtual são inicializados em bootAsync() via setEmp()
@@ -487,6 +494,17 @@ const fmtD = d => d ? d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : '';
 const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
 const round2 = v => Math.round(v*100)/100;
 const TIPOS = {P:'Pagamento', D:'Depósito', T:'Transferência'};
+/* Lista única de módulos para permissão. Estava duplicada em três lugares e
+   saía de sincronia a cada módulo novo. */
+const MODS_PERM = [
+  {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
+  {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
+  {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
+  {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
+  {k:'ca',l:'🔄 Conta Azul'},
+  {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
+  {k:'saldos',l:'💰 Ver saldos das contas'},{k:'editar',l:'✏️ Criar, alterar e excluir dados'}
+];
 const conta = id => DB.contas.find(c=>c.id===id);
 const plano = id => DB.planos.find(p=>p.id===id);
 const cc = id => DB.ccustos.find(c=>c.id===id);
@@ -1396,14 +1414,7 @@ function bindAdm(){
 window.editUserPerms = function(id){
   if(!podeEditar()) return bloqueado();
   const u=ROOT.usuarios.find(x=>x.id===id); if(!u) return;
-  const MODS=[
-    {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
-    {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
-    {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
-    {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
-    {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
-    {k:'saldos',l:'💰 Ver saldos das contas'},{k:'editar',l:'✏️ Criar, alterar e excluir dados'}
-  ];
+  const MODS = MODS_PERM;
   const pf=perfil(u);
   openModal(`<h3>🔑 Permissões — ${esc(u.nome)}</h3>
   <p class="mut sm-t" style="margin-bottom:12px">Perfil atual: <b>${esc(pf.nome)}</b>. Alterar o perfil aqui troca as permissões imediatamente.</p>
@@ -1434,14 +1445,7 @@ window.editPerfil = function(id){
   if(!podeEditar()) return bloqueado();
   if(!ROOT.perfis) ROOT.perfis=[];
   const pf=id?(ROOT.perfis.find(x=>x.id===id)||null):null;
-  const MODS=[
-    {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
-    {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
-    {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
-    {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
-    {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
-    {k:'saldos',l:'💰 Ver saldos das contas'},{k:'editar',l:'✏️ Criar, alterar e excluir dados'}
-  ];
+  const MODS = MODS_PERM;
   openModal(`<h3>${id?'Editar':'Novo'} Perfil</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px">
     <label>Nome do perfil<input id="pf-n" value="${esc(pf?pf.nome:'')}" placeholder="ex: Financeiro"></label>
@@ -1476,7 +1480,7 @@ function render(){
   updateEmpBar();
   // usuário sem permissão na aba atual cai na primeira aba permitida
   if(USER && !podeVer(VIEW)){
-    VIEW = ['dash','lanc','conc','rel','grupo','ai','cad','favs','cpr','emailcfg','docs','contab','bkp','adm']
+    VIEW = ['dash','lanc','conc','rel','grupo','ca','ai','cad','favs','cpr','emailcfg','docs','contab','bkp','adm']
              .find(m=>hasPerm(m)) || 'dash';
     document.querySelectorAll('#nav a').forEach(x=>x.classList.toggle('on', x.dataset.v===VIEW));
   }
@@ -1485,6 +1489,7 @@ function render(){
   else if(VIEW==='conc'){ M.innerHTML = vConc(); bindConc(); }
   else if(VIEW==='rel'){ M.innerHTML = vRel(); bindRel(); }
   else if(VIEW==='grupo'){ M.innerHTML = vGrupo(); bindGrupo(); }
+  else if(VIEW==='ca'){ M.innerHTML = vCA(); bindCA(); }
   else if(VIEW==='ai'){ M.innerHTML = vAI(); bindAI(); }
   else if(VIEW==='aicfg'){ M.innerHTML = vAICfg(); bindAICfg(); }
   else if(VIEW==='cad'){ M.innerHTML = vCad(); }
@@ -4620,6 +4625,686 @@ async function baixarModeloFav(){
     toast('Modelo baixado em CSV (o Excel abre normalmente).');
   }
 }
+/* ══════════════════════════════════════════════════════════════════
+   CONTA AZUL — importação do extrato financeiro, aprendizado e de-para
+
+   Observações do formato real (conferidas em dois exports de 2026):
+   - O arquivo vem com extensão .xls mas é XLSX por dentro. O SheetJS
+     fareja o conteúdo, então não se confia na extensão.
+   - O rateio vem em blocos de 4 colunas repetidos:
+       Categoria N | Valor na Categoria N | Centro de Custo | Valor no Centro
+     O NÚMERO DE BLOCOS VARIA conforme o período exportado (vimos 4 e 5).
+     Pior: todas as colunas de centro de custo vêm rotuladas "Centro de
+     Custo 1", mesmo as do 2º bloco em diante. Por isso o mapeamento é
+     por POSIÇÃO a partir de cada "Categoria", nunca por nome de coluna.
+   - Datas em dd/mm/aaaa como texto. Valores negativos para despesa.
+   - "Identificador do fornecedor/cliente" traz CPF/CNPJ só com dígitos —
+     é a melhor chave de casamento que o arquivo oferece.
+   ═════════════════════════════════════════════════════════════════ */
+function caDB(){
+  if(!DB.ca) DB.ca = {};
+  const c = DB.ca;
+  if(!Array.isArray(c.imports)) c.imports = [];   // lotes importados
+  if(!c.depara  || typeof c.depara  !== 'object') c.depara  = {};  // categoriaCA -> planoId
+  if(!c.deparaAuto || typeof c.deparaAuto !== 'object') c.deparaAuto = {}; // quais vieram de palpite
+  if(!c.regras  || typeof c.regras  !== 'object') c.regras  = {};  // chaveFav   -> {cat, cc, n}
+  return c;
+}
+/* Todos os lançamentos do CA já importados, de todos os lotes */
+function caLancs(){ return caDB().imports.flatMap(l=>l.lancs||[]); }
+
+/* Resolve o de-para de uma categoria num lugar só. Um plano excluído deixa
+   o id órfão no mapa; sem esta checagem uma tela diz "mapeado" e outra diz
+   "pendente" para a mesma categoria. */
+function caPlanoDe(cat){
+  const id = +caDB().depara[cat];
+  if(!id) return null;
+  return DB.planos.find(p=>p.id===id) || null;
+}
+/* Pendente = sem mapeamento OU mapeado por palpite ainda não confirmado */
+function caPendente(cat){ const c = caDB(); return !caPlanoDe(cat) || !!c.deparaAuto[cat]; }
+
+function caNum(v){
+  if(typeof v === 'number') return v;
+  let s = String(v==null?'':v).trim();
+  if(!s) return 0;
+  s = s.replace(/[R$\s ]/g,'');
+  // "1.234,56" (br) vs "-1234.56" (cru) — decide pelo último separador
+  const vir = s.lastIndexOf(','), pon = s.lastIndexOf('.');
+  if(vir > pon)      s = s.replace(/\./g,'').replace(',','.');
+  else if(pon > vir) s = s.replace(/,/g,'');
+  else               s = s.replace(',','.');
+  const n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+function caData(v){
+  const s = String(v==null?'':v).trim();
+  let m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);          // dd/mm/aaaa
+  if(m) return m[3]+'-'+m[2]+'-'+m[1];
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);                 // já ISO
+  if(m) return m[0];
+  return '';
+}
+/* Chave de identidade do favorecido: documento quando houver, senão nome */
+function caChaveFav(doc, nome){
+  const d = soDigitos(doc);
+  return d ? 'D:'+d : 'N:'+norm(nome);
+}
+
+/* Converte a planilha (array de arrays) nos lançamentos do CA.
+   Devolve {lancs, avisos} — nunca lança exceção por linha ruim. */
+function caParse(aoa){
+  const avisos = [];
+  if(!Array.isArray(aoa) || aoa.length < 2 || !Array.isArray(aoa[0]))
+    return { lancs:[], avisos:['Planilha vazia ou em formato inesperado.'], nBlocos:0 };
+  const hdr = aoa[0].map(h=>String(h==null?'':h).trim());
+  const achar = (...alts)=>{
+    for(const a of alts){
+      const i = hdr.findIndex(h=>norm(h)===norm(a));
+      if(i>=0) return i;
+    }
+    return -1;
+  };
+  const col = {
+    data:  achar('Data movimento','Data'),
+    doc:   achar('Identificador do fornecedor/cliente','Identificador'),
+    nome:  achar('Nome do fornecedor/cliente','Favorecido','Nome'),
+    desc:  achar('Descrição','Historico','Histórico'),
+    tipo:  achar('Tipo'),
+    conta: achar('Conta bancária','Conta'),
+    forma: achar('Forma de pgto/recbto'),
+    valor: achar('Valor (R$)','Valor'),
+    saldo: achar('Saldo conta (R$)'),
+    sit:   achar('Situação'),
+    comp:  achar('Data de competência'),
+    venc:  achar('Data original de vencimento'),
+    obs:   achar('Observações'),
+    nf:    achar('Nota fiscal')
+  };
+  if(col.data<0 || col.valor<0)
+    return { lancs:[], avisos:['Não encontrei as colunas "Data movimento" e "Valor (R$)". Este arquivo não parece ser o Extrato Financeiro do Conta Azul.'] };
+
+  // blocos de rateio: toda coluna cujo cabeçalho começa com "Categoria"
+  const blocos = [];
+  hdr.forEach((h,i)=>{ if(/^categoria/i.test(norm(h))) blocos.push(i); });
+  if(!blocos.length) avisos.push('Nenhuma coluna de Categoria encontrada — os lançamentos virão sem classificação.');
+
+  const lancs = [];
+  for(let i=1;i<aoa.length;i++){
+    const r = aoa[i];
+    if(!r || !String(r[col.data]||'').trim()) continue;
+    const data = caData(r[col.data]);
+    if(!data){ avisos.push('Linha '+(i+1)+': data não reconhecida ("'+r[col.data]+'"), linha ignorada.'); continue; }
+    const v = round2(caNum(r[col.valor]));
+    const partes = [];
+    for(const b of blocos){
+      const cat = String(r[b]==null?'':r[b]).trim();
+      if(!cat) continue;
+      partes.push({
+        cat,
+        v:  round2(caNum(r[b+1])),
+        cc: String(r[b+2]==null?'':r[b+2]).trim()
+      });
+    }
+    const somaP = round2(partes.reduce((a,p)=>a+p.v,0));
+    const fecha = !partes.length || Math.abs(somaP - v) < 0.005;
+    lancs.push({
+      data, v,
+      /* Só guardamos o que alguma tela usa ou que a auditoria vai precisar.
+         Cada campo extra multiplica por 400+ lançamentos/mês × empresas, e o
+         banco inteiro trafega em cada gravação. "saldo", "forma", "venc" e
+         "obs" ficaram de fora por isso. */
+      doc:   soDigitos(r[col.doc]),
+      nome:  String(r[col.nome]==null?'':r[col.nome]).trim(),
+      desc:  String(r[col.desc]==null?'':r[col.desc]).trim(),
+      conta: String(r[col.conta]==null?'':r[col.conta]).trim(),
+      sit:   col.sit<0  ?'':String(r[col.sit]||'').trim(),
+      comp:  col.comp<0 ?'':caData(r[col.comp]),
+      nf:    col.nf<0   ?'':String(r[col.nf]||'').trim(),
+      partes, fecha,
+      cat: partes.length?partes[0].cat:'',
+      cc:  partes.length?partes[0].cc :''
+    });
+    if(!fecha) avisos.push('Linha '+(i+1)+': a soma do rateio ('+fmt(somaP)+') difere do valor ('+fmt(v)+').');
+  }
+  return { lancs, avisos, nBlocos:blocos.length };
+}
+
+/* ── Aprendizado: fornecedor → categoria ─────────────────────────
+   72 de 74 fornecedores recebem sempre a mesma categoria nos exports
+   reais, então a regra determinística cobre quase tudo. Guardamos a
+   contagem para saber quando um fornecedor é ambíguo. */
+function caAprender(lancs){
+  const c = caDB();
+  const mapa = {};
+  for(const l of lancs){
+    if(!l.cat) continue;
+    const k = caChaveFav(l.doc, l.nome);
+    if(!mapa[k]) mapa[k] = { nome:l.nome, doc:l.doc, cats:{}, ccs:{} };
+    mapa[k].cats[l.cat] = (mapa[k].cats[l.cat]||0)+1;
+    if(l.cc) mapa[k].ccs[l.cc] = (mapa[k].ccs[l.cc]||0)+1;
+  }
+  let novas = 0, atualizadas = 0;
+  for(const k of Object.keys(mapa)){
+    const m = mapa[k];
+    const top = o => Object.entries(o).sort((a,b)=>b[1]-a[1])[0];
+    const tc = top(m.cats), tcc = top(m.ccs);
+    const totC = Object.values(m.cats).reduce((a,b)=>a+b,0);
+    const reg = {
+      nome: m.nome, doc: m.doc,
+      cat:  tc ? tc[0] : '',
+      cc:   tcc ? tcc[0] : '',
+      n:    totC,
+      // quantas categorias distintas esse fornecedor já recebeu
+      amb:  Object.keys(m.cats).length,
+      conf: tc ? Math.round(tc[1]/totC*100) : 0
+    };
+    if(c.regras[k]) atualizadas++; else novas++;
+    c.regras[k] = reg;
+  }
+  return { novas, atualizadas, total:Object.keys(c.regras).length };
+}
+/* Aplica o aprendizado a um favorecido — usado para sugerir classificação */
+function caSugerir(nome, doc){
+  const c = caDB();
+  return c.regras[caChaveFav(doc, nome)] || c.regras['N:'+norm(nome)] || null;
+}
+
+/* ── Catálogo do Conta Azul extraído dos lotes importados ────────── */
+function caCatalogo(){
+  const cats = {}, ccs = {};
+  for(const l of caLancs()){
+    const ps = (l.partes||[]);
+    for(const p of (ps.length?ps:[{cat:l.cat,cc:l.cc,v:l.v}])){
+      if(p.cat){ cats[p.cat] = cats[p.cat] || { n:0, v:0 }; cats[p.cat].n++; cats[p.cat].v = round2(cats[p.cat].v + p.v); }
+      if(p.cc ){ ccs[p.cc]   = ccs[p.cc]   || { n:0, v:0 }; ccs[p.cc].n++;   ccs[p.cc].v   = round2(ccs[p.cc].v   + p.v); }
+    }
+  }
+  return { cats, ccs };
+}
+
+/* ── De-para: sugestão automática por similaridade ────────────────
+   Compara a categoria do CA com o plano de contas do sistema usando
+   palavras em comum. Não decide nada sozinho: só pré-seleciona. */
+function caPalavras(s){
+  const STOPCA = new Set(['DE','DA','DO','DAS','DOS','E','A','O','COM','EM','PARA','POR','AO','NA','NO','SERVICOS','SERVICO','OUTROS','OUTRAS','GERAL','DIVERSOS']);
+  return norm(s).replace(/[^A-Z0-9 ]/g,' ').split(/\s+/)
+    .filter(w=>w.length>2 && !STOPCA.has(w));
+}
+function caSugerirPlano(catCA){
+  const alvo = caPalavras(catCA);
+  if(!alvo.length) return null;
+  let melhor = null, melhorNota = 0, empate = false;
+  for(const p of DB.planos){
+    const w = caPalavras(p.nome);
+    if(!w.length) continue;
+    const comuns = alvo.filter(x=>w.includes(x)).length;
+    if(!comuns) continue;
+    /* Exige que a sugestão cubra TODAS as palavras do alvo. Sem isso,
+       "Honorários Contábeis" casava com "Honorários Advocatícios" só pela
+       palavra "Honorários" — o palpite errado mais perigoso, porque parece
+       certo. Entre os que cobrem tudo, vence o mais específico (Jaccard). */
+    if(comuns < alvo.length) continue;
+    const nota = comuns / new Set(alvo.concat(w)).size;
+    if(nota > melhorNota){ melhorNota = nota; melhor = p; empate = false; }
+    else if(nota === melhorNota && melhor) empate = true;
+  }
+  return (melhor && !empate) ? melhor : null;
+}
+
+/* ── Qualidade da classificação ──────────────────────────────────── */
+const CA_SUSPEITO = /IDENTIFICAR|NAO IDENTIFICAD|PROVISOR|A CLASSIFICAR|DIVERSOS|AJUSTE|FRAUDE|PENDENTE/;
+function caQualidade(cat){
+  const lancs = caLancs();
+  const semClass = [], naoFecha = [], semDoc = [];
+  for(const l of lancs){
+    if(!l.fecha) naoFecha.push(l);
+    const ps = l.partes || [];
+    if(!ps.length){ semClass.push({ l, motivo:'sem categoria' }); continue; }
+    const txt = ps.map(p=>norm(p.cat)+' '+norm(p.cc)).join(' ');
+    if(CA_SUSPEITO.test(txt)) semClass.push({ l, motivo:'classificação provisória' });
+    if(!l.doc) semDoc.push(l);
+  }
+  // Grafias quase idênticas = provável duplicata no cadastro do CA.
+  // normaliza UMA vez antes do laço: norm() dentro do n² custa caro quando
+  // o catálogo cresce (300 categorias = 45 mil pares).
+  const cats = (cat || caCatalogo()).cats;
+  const nomes = Object.keys(cats);
+  const N = nomes.map(x=>norm(x).replace(/[^A-Z0-9]/g,''));
+  const dup = [];
+  for(let i=0;i<nomes.length;i++) for(let j=i+1;j<nomes.length;j++){
+    const a = N[i], b = N[j];
+    if(a===b || (a.length>6 && (a.includes(b)||b.includes(a)) && Math.abs(a.length-b.length)<=3))
+      dup.push([nomes[i], nomes[j]]);
+  }
+  const vSusp = round2(semClass.reduce((s,x)=>s+Math.abs(x.l.v),0));
+  const vTot  = round2(lancs.reduce((s,l)=>s+Math.abs(l.v),0));
+  return { lancs, semClass, naoFecha, semDoc, dup, vSusp, vTot,
+           pct: vTot ? (vSusp/vTot*100) : 0 };
+}
+
+/* ── Tela ────────────────────────────────────────────────────────── */
+function vCA(){
+  if(!hasPerm('ca')) return '<h2>🔄 Conta Azul</h2><div class="panel"><p>Você não tem permissão para acessar este módulo.</p></div>';
+  const c = caDB(), ed = podeEditar();
+  const lancs = caLancs();
+  const head = `<h2>🔄 Conta Azul <span class="sm-t mut" style="font-weight:400">— ${esc(empAtual().nome)}</span></h2>`;
+
+  if(!lancs.length) return head + `<div class="panel">
+    <p>Importe o <b>Extrato Financeiro</b> do Conta Azul para comparar com o que está aqui e aprender a classificação que a contabilidade usa.</p>
+    <p class="sm-t mut">No Conta Azul: Relatórios → Extrato Financeiro → escolha o período → Exportar. O arquivo vem como <code>.xls</code>, e serve assim mesmo.</p>
+    ${ed?`<button id="ca-imp">📥 Importar extrato do Conta Azul</button>
+    <input type="file" id="ca-file" accept=".xls,.xlsx,.csv" style="display:none">`
+       :'<p class="sm-t mut">Seu perfil é somente leitura.</p>'}
+  </div>`;
+
+  const abas = [['resumo','📊 Resumo'],['cat','🏷️ Categorias'],['depara','🔀 De-para'],
+                ['regras','🧠 Regras aprendidas'],['qual','🔍 Qualidade'],['lanc','📒 Lançamentos']];
+  return head + `
+  <div class="toolbar">
+    ${ed?`<button id="ca-imp">📥 Importar extrato</button>
+    <input type="file" id="ca-file" accept=".xls,.xlsx,.csv" style="display:none">`:''}
+    <button class="sec" id="ca-csv">Exportar CSV</button>
+    <span class="mut sm-t" style="margin-left:auto">${c.imports.length} importação(ões) · ${lancs.length} lançamentos</span>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+    ${abas.map(([k,l])=>`<button class="${CAF.aba===k?'':'sec'}" data-caaba="${k}">${l}</button>`).join('')}
+  </div>
+  <div id="ca-body">${caBody()}</div>`;
+}
+
+function caBody(){
+  if(CAF.aba==='cat')    return caVCategorias();
+  if(CAF.aba==='depara') return caVDepara();
+  if(CAF.aba==='regras') return caVRegras();
+  if(CAF.aba==='qual')   return caVQualidade();
+  if(CAF.aba==='lanc')   return caVLancamentos();
+  return caVResumo();
+}
+
+function caVResumo(){
+  const c = caDB(), lancs = caLancs();
+  const cat = caCatalogo();
+  const { cats, ccs } = cat;
+  const q = caQualidade(cat);   // reaproveita o catálogo em vez de recalcular
+  const ds = lancs.map(l=>l.data).filter(Boolean).sort();
+  const ent = round2(lancs.filter(l=>l.v>0).reduce((s,l)=>s+l.v,0));
+  const sai = round2(lancs.filter(l=>l.v<0).reduce((s,l)=>s-l.v,0));
+  const regras = Object.values(c.regras);
+  const firmes = regras.filter(r=>r.amb===1).length;
+  const semDe  = Object.keys(cats).filter(caPendente).length;
+  const sugs   = Object.keys(cats).filter(k=>c.deparaAuto[k] && caPlanoDe(k)).length;
+  return `
+  <div class="lanc-resumo">
+    <div class="lr"><span class="lb">Período importado</span><span class="vl" style="font-size:14px">${ds.length?fmtD(ds[0])+' a '+fmtD(ds[ds.length-1]):'—'}</span></div>
+    <div class="lr"><span class="lb">Entradas</span><span class="vl pos">${fmt(ent)}</span></div>
+    <div class="lr"><span class="lb">Saídas</span><span class="vl neg">${fmt(sai)}</span></div>
+    <div class="lr"><span class="lb">Lançamentos</span><span class="vl">${lancs.length}</span></div>
+  </div>
+  <div style="display:flex;gap:18px;flex-wrap:wrap">
+    <div class="panel" style="flex:1;min-width:300px">
+      <h3 style="margin-top:0">O que foi aprendido</h3>
+      <table>
+        <tr><td>Categorias distintas no Conta Azul</td><td class="r"><b>${Object.keys(cats).length}</b></td></tr>
+        <tr><td>Centros de custo distintos</td><td class="r"><b>${Object.keys(ccs).length}</b></td></tr>
+        <tr><td>Fornecedores com regra de classificação</td><td class="r"><b>${regras.length}</b></td></tr>
+        <tr><td>…destes, sempre na mesma categoria</td><td class="r"><b class="pos">${firmes}</b> <span class="sm-t mut">(${regras.length?Math.round(firmes/regras.length*100):0}%)</span></td></tr>
+        <tr><td>Categorias a confirmar no de-para</td><td class="r">${semDe?`<b class="neg">${semDe}</b>`:'<b class="pos">0</b>'}</td></tr>
+        ${sugs?`<tr><td class="sm-t mut" style="padding-left:16px">…destas, com palpite do sistema aguardando confirmação</td><td class="r sm-t"><b>${sugs}</b></td></tr>`:''}
+      </table>
+      ${semDe?`<p class="sm-t mut" style="margin-bottom:0">Sugestão do sistema <b>não é mapeamento confirmado</b>. Enquanto houver categoria a confirmar, a exportação para o escritório sai incompleta ou errada.</p>`:''}
+    </div>
+    <div class="panel" style="flex:1;min-width:300px">
+      <h3 style="margin-top:0">Qualidade da classificação</h3>
+      ${q.semClass.length?`<div class="rl-aviso amb" style="margin:0 0 10px">
+        <b>${fmt(q.vSusp)}</b> em ${q.semClass.length} lançamento(s) sem classificação real —
+        ${q.pct.toFixed(1)}% do movimento do período.
+      </div>`:'<div class="rl-aviso" style="margin:0 0 10px">✅ Nenhum lançamento com classificação provisória.</div>'}
+      <table>
+        <tr><td>Rateios que não fecham com o valor</td><td class="r">${q.naoFecha.length?`<b class="neg">${q.naoFecha.length}</b>`:'<b class="pos">0</b>'}</td></tr>
+        <tr><td>Lançamentos sem CPF/CNPJ do favorecido</td><td class="r"><b>${q.semDoc.length}</b></td></tr>
+        <tr><td>Categorias com grafia quase idêntica</td><td class="r">${q.dup.length?`<b class="neg">${q.dup.length}</b>`:'<b class="pos">0</b>'}</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="panel"><h3 style="margin-top:0">Importações</h3>
+    <table class="tb-lanc">
+      <tr><th>Quando</th><th>Arquivo</th><th>Período</th><th class="r">Lançamentos</th><th class="r">Valor</th><th></th></tr>
+      ${c.imports.map(i=>`<tr>
+        <td class="nw">${fmtD((i.ts||'').slice(0,10))}</td>
+        <td>${esc(i.arquivo||'—')}</td>
+        <td class="sm-t">${i.de?fmtD(i.de)+' a '+fmtD(i.ate):'—'}</td>
+        <td class="r">${(i.lancs||[]).length}</td>
+        <td class="r vlr">${fmt(round2((i.lancs||[]).reduce((s,l)=>s+l.v,0)))}</td>
+        <td class="acs">${podeEditar()?`<button class="sm sec" data-cadel="${esc(i.id)}" title="Remover esta importação">🗑️</button>`:''}</td>
+      </tr>`).join('')}
+    </table>
+  </div>`;
+}
+
+function caVCategorias(){
+  const { cats, ccs } = caCatalogo();
+  const c = caDB();
+  const falta = o => Object.keys(o).filter(k=>!DB.planos.some(p=>norm(p.nome)===norm(k)));
+  const faltaCC = Object.keys(ccs).filter(k=>!DB.ccustos.some(x=>norm(x.nome)===norm(k)));
+  const ordenar = o => Object.entries(o).sort((a,b)=>Math.abs(b[1].v)-Math.abs(a[1].v));
+  return `
+  ${podeEditar()?`<div class="rl-aviso" style="margin-bottom:12px">
+    O Conta Azul usa <b>${Object.keys(cats).length}</b> categorias e <b>${Object.keys(ccs).length}</b> centros de custo neste período.
+    ${faltaCC.length?`<b>${faltaCC.length}</b> centro(s) ainda não existem aqui.`:''}
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="sm" id="ca-criar-cc">Criar os centros de custo que faltam</button>
+    </div>
+  </div>`:''}
+  <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">
+    <div class="panel" style="flex:1.3;min-width:340px"><h3 style="margin-top:0">Categorias do Conta Azul</h3>
+      <table class="tb-lanc"><tr><th>Categoria</th><th class="r">Usos</th><th class="r">Valor</th><th>De-para</th></tr>
+        ${ordenar(cats).map(([k,v])=>{
+          const p = caPlanoDe(k), auto = c.deparaAuto[k];
+          return `<tr><td>${esc(k)}</td><td class="r">${v.n}</td><td class="r vlr">${fmt(v.v)}</td>
+            <td class="sm-t">${p
+              ? `<span class="badge ${auto?'b-warn':'b-ok'}" ${auto?'title="Palpite do sistema — confirme na aba De-para"':''}>${auto?'↯ ':''}${esc(p.nome)}</span>`
+              : '<span class="badge b-warn">pendente</span>'}</td></tr>`;
+        }).join('')}
+      </table>
+    </div>
+    <div class="panel" style="flex:1;min-width:280px"><h3 style="margin-top:0">Centros de custo</h3>
+      <table class="tb-lanc"><tr><th>Centro</th><th class="r">Usos</th><th class="r">Valor</th><th></th></tr>
+        ${ordenar(ccs).map(([k,v])=>{
+          const existe = DB.ccustos.some(x=>norm(x.nome)===norm(k));
+          return `<tr><td>${esc(k)}</td><td class="r">${v.n}</td><td class="r vlr">${fmt(v.v)}</td>
+            <td class="sm-t">${existe?'<span class="ic ok">✓</span>':'<span class="badge b-warn">falta</span>'}</td></tr>`;
+        }).join('')}
+      </table>
+    </div>
+  </div>`;
+}
+
+function caVDepara(){
+  const c = caDB(), { cats } = caCatalogo();
+  const lista = Object.entries(cats).sort((a,b)=>Math.abs(b[1].v)-Math.abs(a[1].v));
+  const pend = lista.filter(([k])=>caPendente(k)).length;
+  const auto = lista.filter(([k])=>c.deparaAuto[k] && caPlanoDe(k));
+  return `
+  <div class="rl-aviso" style="margin-bottom:12px">
+    Ligue cada categoria do Conta Azul a um plano de conta daqui. É isso que permite você trabalhar
+    com a sua estrutura e, na hora de mandar o pacote, traduzir para a linguagem do escritório.
+    ${pend?`<b>${pend}</b> ainda a confirmar.`:'<b>Tudo confirmado.</b>'}
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      ${podeEditar()?`<button class="sm sec" id="ca-auto">✨ Sugerir os que faltam</button>`:''}
+      ${podeEditar()&&auto.length?`<button class="sm" id="ca-conf">✓ Confirmar os ${auto.length} palpites</button>`:''}
+    </div>
+  </div>
+  ${auto.length?`<div class="rl-aviso amb" style="margin-bottom:12px">
+    As linhas marcadas com <b>↯ sugerido</b> foram preenchidas por palpite do sistema a partir da semelhança dos nomes.
+    Confira uma a uma: elas só deixam de contar como pendentes depois de você confirmar.
+  </div>`:''}
+  <div class="panel" style="padding:0;overflow:hidden">
+    <table class="tb-lanc">
+      <tr><th>Categoria no Conta Azul</th><th class="r">Usos</th><th class="r">Valor</th><th style="width:38%">Plano de conta aqui</th></tr>
+      ${lista.map(([k,v])=>{
+        const p = caPlanoDe(k), ehAuto = c.deparaAuto[k] && p;
+        return `<tr>
+        <td><b>${esc(k)}</b>${ehAuto?' <span class="badge b-warn" title="Palpite do sistema">↯ sugerido</span>':''}</td>
+        <td class="r">${v.n}</td>
+        <td class="r vlr">${fmt(v.v)}</td>
+        <td>${podeEditar()
+          ? `<select class="ca-dp" data-cat="${esc(k)}" style="width:100%">${selPl(p?p.id:'', '— não mapeado —')}</select>`
+          : (p ? esc(p.nome) : '<span class="mut">—</span>')}</td>
+      </tr>`; }).join('')}
+    </table>
+  </div>`;
+}
+
+function caVRegras(){
+  const c = caDB();
+  const qn = norm(CAF.q);
+  let regs = Object.entries(c.regras).map(([k,r])=>({ k, ...r }));
+  if(qn) regs = regs.filter(r=>norm(r.nome+' '+r.cat+' '+(r.doc||'')).includes(qn));
+  regs.sort((a,b)=>b.n-a.n);
+  const amb = regs.filter(r=>r.amb>1);
+  return `
+  <div class="rl-aviso" style="margin-bottom:12px">
+    Extraído do histórico: qual categoria a contabilidade usa para cada favorecido.
+    Quando você lançar um pagamento para alguém desta lista, o sistema já sugere a classificação.
+    ${amb.length?`<b>${amb.length}</b> favorecido(s) recebem mais de uma categoria — nesses o palpite é menos confiável.`:''}
+  </div>
+  <div class="flt"><label>Buscar<input id="ca-q" value="${esc(CAF.q)}" placeholder="favorecido, categoria, CNPJ..."></label></div>
+  <div class="panel" style="padding:0;overflow:hidden">
+    <table class="tb-lanc">
+      <tr><th>Favorecido</th><th>CPF / CNPJ</th><th>Categoria aprendida</th><th>Centro de custo</th><th class="r">Lanç.</th><th class="r">Confiança</th></tr>
+      ${regs.slice(0, CAF.lim).map(r=>`<tr>
+        <td><b>${esc(r.nome||'—')}</b></td>
+        <td class="sm-t mut">${esc(r.doc||'—')}</td>
+        <td class="sm-t">${esc(r.cat)}</td>
+        <td class="sm-t">${esc(r.cc||'—')}</td>
+        <td class="r">${r.n}</td>
+        <td class="r sm-t">${r.amb>1
+          ? `<span class="badge b-warn" title="${r.amb} categorias diferentes">${r.conf}%</span>`
+          : `<span class="badge b-ok">100%</span>`}</td>
+      </tr>`).join('')}
+    </table>
+    ${regs.length>CAF.lim?`<div style="padding:14px;text-align:center;border-top:1px solid var(--bd);background:#fbfcfe">
+      <button class="sec" id="ca-more">Mostrar mais 300</button>
+      <span class="sm-t mut">${regs.length-CAF.lim} não exibidos</span></div>`:''}
+  </div>`;
+}
+
+function caVQualidade(){
+  const q = caQualidade();
+  const linha = x => `<tr>
+    <td class="nw">${fmtD(x.l.data)}</td>
+    <td><b>${esc(x.l.nome||'—')}</b><div class="sm-t mut">${esc((x.l.desc||'').slice(0,70))}</div></td>
+    <td class="r vlr neg">${fmt(x.l.v)}</td>
+    <td class="sm-t">${esc(x.l.cat||'—')}<div class="sm-t mut">${esc(x.l.cc||'')}</div></td>
+    <td><span class="badge b-warn">${esc(x.motivo)}</span></td></tr>`;
+  return `
+  ${q.semClass.length?`<div class="rl-aviso amb" style="margin-bottom:12px">
+    <b>${fmt(q.vSusp)}</b> em ${q.semClass.length} lançamento(s) estão em categoria provisória, "a identificar",
+    ajuste ou perda — ${q.pct.toFixed(1)}% do movimento importado. São os que valem cobrar explicação do escritório.
+  </div>`:''}
+  <div class="panel" style="padding:0;overflow:hidden">
+    <table class="tb-lanc">
+      <tr><th>Data</th><th>Favorecido</th><th class="r">Valor</th><th>Classificação</th><th>Por quê</th></tr>
+      ${q.semClass.sort((a,b)=>Math.abs(b.l.v)-Math.abs(a.l.v)).slice(0,300).map(linha).join('')
+        || '<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--mut)">Nada a apontar.</td></tr>'}
+    </table>
+  </div>
+  ${q.dup.length?`<div class="panel"><h3 style="margin-top:0">Categorias com grafia quase idêntica</h3>
+    <p class="sm-t mut" style="margin-top:0">Provável duplicata no cadastro do Conta Azul — o mesmo gasto acaba dividido em duas categorias e some dos relatórios.</p>
+    <table class="tb-lanc"><tr><th>Categoria</th><th>Parecida com</th></tr>
+      ${q.dup.map(([a,b])=>`<tr><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('')}
+    </table></div>`:''}
+  ${q.naoFecha.length?`<div class="panel"><h3 style="margin-top:0">Rateios que não fecham</h3>
+    <table class="tb-lanc"><tr><th>Data</th><th>Favorecido</th><th class="r">Valor</th><th class="r">Soma do rateio</th></tr>
+      ${q.naoFecha.map(l=>`<tr><td class="nw">${fmtD(l.data)}</td><td>${esc(l.nome)}</td>
+        <td class="r vlr">${fmt(l.v)}</td>
+        <td class="r vlr neg">${fmt(round2((l.partes||[]).reduce((s,p)=>s+p.v,0)))}</td></tr>`).join('')}
+    </table></div>`:''}`;
+}
+
+function caVLancamentos(){
+  const qn = norm(CAF.q);
+  let L = caLancs();
+  if(qn) L = L.filter(l=>norm(l.nome+' '+l.desc+' '+l.cat+' '+(l.doc||'')).includes(qn));
+  L.sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  return `
+  <div class="flt"><label>Buscar<input id="ca-q" value="${esc(CAF.q)}" placeholder="favorecido, descrição, categoria..."></label>
+    <span class="sm-t mut" style="align-self:flex-end;padding-bottom:6px">${L.length} lançamento(s)</span></div>
+  <div class="panel" style="padding:0;overflow:hidden">
+    <table class="tb-lanc">
+      <tr><th>Data</th><th>Favorecido</th><th>Descrição</th><th>Categoria</th><th>Centro</th><th class="r">Valor</th></tr>
+      ${L.slice(0, CAF.lim).map(l=>`<tr>
+        <td class="nw">${fmtD(l.data)}</td>
+        <td><b>${esc(l.nome||'—')}</b>${l.doc?`<div class="sm-t mut">${esc(l.doc)}</div>`:''}</td>
+        <td class="hist" title="${esc(l.desc)}">${esc(l.desc)}</td>
+        <td class="sm-t">${esc(l.cat||'—')}${(l.partes||[]).length>1?` <span class="badge b-acc">×${l.partes.length}</span>`:''}</td>
+        <td class="sm-t">${esc(l.cc||'—')}</td>
+        <td class="r vlr ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td>
+      </tr>`).join('')}
+    </table>
+    ${L.length>CAF.lim?`<div style="padding:14px;text-align:center;border-top:1px solid var(--bd);background:#fbfcfe">
+      <button class="sec" id="ca-more">Mostrar mais 300</button>
+      <span class="sm-t mut">${L.length-CAF.lim} não exibidos</span></div>`:''}
+  </div>`;
+}
+
+function bindCA(){
+  if(!hasPerm('ca')) return;
+  document.querySelectorAll('[data-caaba]').forEach(b=>b.onclick=()=>{ CAF.aba=b.dataset.caaba; CAF.lim=200; render(); });
+  const imp = $('#ca-imp'), file = $('#ca-file');
+  if(imp && file){
+    imp.onclick = ()=>file.click();
+    file.onchange = async e=>{
+      const f = e.target.files[0]; e.target.value='';
+      if(f) await caImportar(f);
+    };
+  }
+  const q = $('#ca-q');
+  if(q) q.oninput = ev=>{ CAF.q=ev.target.value; CAF.lim=200; clearTimeout(window._caq);
+    window._caq = setTimeout(()=>{ render(); const n=$('#ca-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } }, 300); };
+  const more = $('#ca-more'); if(more) more.onclick = ()=>{ CAF.lim+=300; render(); };
+
+  // escolha manual sempre vale como confirmada
+  document.querySelectorAll('.ca-dp').forEach(s=>s.onchange = ()=>{
+    const c = caDB(), cat = s.dataset.cat;
+    if(s.value) c.depara[cat] = +s.value; else delete c.depara[cat];
+    delete c.deparaAuto[cat];
+    save(); render(); toast('De-para confirmado.');
+  });
+  const auto = $('#ca-auto');
+  if(auto) auto.onclick = ()=>{
+    const c = caDB(), { cats } = caCatalogo();
+    let n = 0;
+    for(const cat of Object.keys(cats)){
+      if(caPlanoDe(cat)) continue;
+      const p = caSugerirPlano(cat);
+      if(p){ c.depara[cat] = p.id; c.deparaAuto[cat] = true; n++; }
+    }
+    if(!n) return alert('Não consegui sugerir nenhuma categoria com segurança. As que sobraram precisam ser ligadas à mão.');
+    save(); render();
+    toast(n+' sugestão(ões). Confira cada uma — ainda contam como pendentes.');
+  };
+  const conf = $('#ca-conf');
+  if(conf) conf.onclick = ()=>{
+    const c = caDB();
+    const n = Object.keys(c.deparaAuto).filter(k=>caPlanoDe(k)).length;
+    if(!n) return;
+    if(!confirm('Confirmar '+n+' mapeamento(s) sugeridos pelo sistema?\n\nFaça isso só depois de conferir a lista — é esse de-para que traduz seus lançamentos para a contabilidade.')) return;
+    c.deparaAuto = {};
+    save(); render(); toast(n+' mapeamento(s) confirmados.');
+  };
+  const ccBtn = $('#ca-criar-cc');
+  if(ccBtn) ccBtn.onclick = ()=>{
+    if(!podeEditar()) return bloqueado();
+    const { ccs } = caCatalogo();
+    const falta = Object.keys(ccs).filter(k=>!DB.ccustos.some(x=>norm(x.nome)===norm(k)));
+    if(!falta.length) return alert('Todos os centros de custo do Conta Azul já existem aqui.');
+    if(!confirm('Criar '+falta.length+' centro(s) de custo em '+empAtual().nome+'?\n\n'+falta.join('\n'))) return;
+    falta.forEach(n=>DB.ccustos.push({ id:nextCadId(DB.ccustos), nome:n }));
+    DB.ccustos.sort((a,b)=>a.nome.localeCompare(b.nome));
+    save(); render(); toast(falta.length+' centro(s) criados.');
+  };
+  document.querySelectorAll('[data-cadel]').forEach(b=>b.onclick=()=>{
+    if(!podeEditar()) return bloqueado();
+    const c = caDB(), i = c.imports.find(x=>String(x.id)===b.dataset.cadel);
+    if(!i) return;
+    if(!confirm('Remover a importação de '+(i.arquivo||'—')+' ('+(i.lancs||[]).length+' lançamentos)?\n\nAs regras já aprendidas e o de-para não são apagados.')) return;
+    c.imports = c.imports.filter(x=>x!==i);
+    save(); render(); toast('Importação removida.');
+  });
+  const csv = $('#ca-csv');
+  if(csv) csv.onclick = ()=>{
+    const rows = [['Data','Favorecido','CPF/CNPJ','Descrição','Categoria CA','Centro CA','Plano aqui','Valor']];
+    const c = caDB();
+    caLancs().forEach(l=>{
+      const ps = l.partes||[];
+      (ps.length?ps:[{cat:l.cat,cc:l.cc,v:l.v}]).forEach(p=>{
+        const pl = caPlanoDe(p.cat);
+        rows.push([fmtD(l.data), l.nome, l.doc, l.desc, p.cat, p.cc, pl?pl.nome:'', nBR(p.v)]);
+      });
+    });
+    dl('conta_azul.csv', csvOut(rows), 'text/csv');
+  };
+}
+
+async function caImportar(file){
+  if(!podeEditar()) return bloqueado();
+  toast('Lendo o arquivo…');
+  let aoa;
+  try{ aoa = await lerArquivoFav(file); }
+  catch(e){ return alert('Não consegui ler o arquivo: '+e.message); }
+  const { lancs, avisos, nBlocos } = caParse(aoa);
+  if(!lancs.length) return alert('Nada para importar.\n\n'+(avisos[0]||''));
+
+  const ds = lancs.map(l=>l.data).sort();
+  const de = ds[0], ate = ds[ds.length-1];
+  const ent = round2(lancs.filter(l=>l.v>0).reduce((s,l)=>s+l.v,0));
+  const sai = round2(lancs.filter(l=>l.v<0).reduce((s,l)=>s-l.v,0));
+  const cats = new Set(), ccs = new Set();
+  lancs.forEach(l=>l.partes.forEach(p=>{ if(p.cat) cats.add(p.cat); if(p.cc) ccs.add(p.cc); }));
+  // já importado? mesmo período + mesma quantidade é forte indício
+  const c = caDB();
+  const rep = c.imports.find(i=>i.de===de && i.ate===ate && (i.lancs||[]).length===lancs.length);
+
+  openModal(`
+  <div class="mhead"><h3>📥 Importar extrato do Conta Azul</h3>
+    <div class="memp"><span class="et">Empresa</span><span class="en">${esc(empAtual().nome)}</span></div>
+  </div>
+  <div class="mbody">
+    ${rep?`<div class="rl-aviso amb" style="margin:12px 0">⚠️ Já existe uma importação com o mesmo período e a mesma quantidade de lançamentos
+      (${fmtD(rep.de)} a ${fmtD(rep.ate)}). Importar de novo <b>duplica</b> os valores nas estatísticas. Remova a anterior se for reimportar.</div>`:''}
+    <div class="lanc-resumo" style="margin:12px 0">
+      <div class="lr"><span class="lb">Período</span><span class="vl" style="font-size:14px">${fmtD(de)} a ${fmtD(ate)}</span></div>
+      <div class="lr"><span class="lb">Lançamentos</span><span class="vl">${lancs.length}</span></div>
+      <div class="lr"><span class="lb">Entradas</span><span class="vl pos">${fmt(ent)}</span></div>
+      <div class="lr"><span class="lb">Saídas</span><span class="vl neg">${fmt(sai)}</span></div>
+    </div>
+    <div class="rl-aviso">
+      <b>${cats.size}</b> categorias e <b>${ccs.size}</b> centros de custo neste arquivo.
+      Rateio em até <b>${nBlocos}</b> categoria(s) por lançamento.
+      <div class="sm-t mut" style="margin-top:6px">Os lançamentos do Conta Azul ficam guardados à parte — <b>não entram</b> nos seus lançamentos nem mexem em saldo algum.</div>
+    </div>
+    ${avisos.length?`<div class="fsec"><div class="ft">Avisos (${avisos.length})</div>
+      <div style="max-height:160px;overflow:auto;border:1px solid var(--bd);border-radius:7px;padding:8px;background:#fffbf0">
+        ${avisos.slice(0,40).map(a=>`<div class="sm-t">• ${esc(a)}</div>`).join('')}
+        ${avisos.length>40?`<div class="sm-t mut">… e mais ${avisos.length-40}</div>`:''}
+      </div></div>`:''}
+    <div class="fsec"><div class="ft">Prévia — 8 primeiros</div>
+      <div class="panel" style="padding:0;overflow:hidden;margin:0">
+        <table class="tb-lanc"><tr><th>Data</th><th>Favorecido</th><th>Categoria</th><th>Centro</th><th class="r">Valor</th></tr>
+        ${lancs.slice(0,8).map(l=>`<tr><td class="nw">${fmtD(l.data)}</td><td>${esc(l.nome)}</td>
+          <td class="sm-t">${esc(l.cat)}</td><td class="sm-t">${esc(l.cc)}</td>
+          <td class="r vlr ${l.v<0?'neg':'pos'}">${fmt(l.v)}</td></tr>`).join('')}
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="mfoot">
+    <span class="sm-t mut esq">${esc(file.name)}</span>
+    <button class="sec" onclick="closeModal()">Cancelar</button>
+    <button id="ca-ok">Importar e aprender</button>
+  </div>`, true, 'modal-lg');
+
+  $('#ca-ok').onclick = ()=>{
+    const c = caDB();
+    c.imports.push({ id:'ca_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+      ts:new Date().toISOString(), arquivo:file.name, de, ate, lancs });
+    const ap = caAprender(lancs);
+    /* Sugere, mas marca como palpite. Gravar de-para em silêncio e mostrar
+       "0 pendentes" seria o pior dos mundos: o erro passa despercebido e sai
+       traduzido no pacote da contabilidade. */
+    let dp = 0;
+    for(const cat of cats){
+      if(caPlanoDe(cat)) continue;
+      const p = caSugerirPlano(cat);
+      if(p){ c.depara[cat]=p.id; c.deparaAuto[cat]=true; dp++; }
+    }
+    save(); closeModal(); CAF.aba='resumo'; render();
+    toast(`${lancs.length} lançamentos · ${ap.novas} regras novas · ${dp} de-para sugeridos (a confirmar).`);
+  };
+}
+
 function loadSheetJS(){
   if(window.XLSX) return Promise.resolve(window.XLSX);
   if(window._xlsxLoad) return window._xlsxLoad;
@@ -4761,14 +5446,7 @@ function vAdm(){
   if(!USER || !hasPerm('adm')) return '<h2>Administração</h2><div class="panel"><p>Acesso restrito a administradores.</p></div>';
   const tab = window._admTab||'usuarios';
   const tabs = [{k:'usuarios',l:'👤 Usuários'},{k:'perfis',l:'🎭 Perfis'},{k:'empresas',l:'🏢 Empresas'}];
-  const MODS = [
-    {k:'dash',l:'📊 Painel'},{k:'lanc',l:'📒 Lançamentos'},{k:'conc',l:'🏦 Conciliação'},
-    {k:'rel',l:'📈 Relatórios'},{k:'grupo',l:'🏢 Visão de Grupo'},{k:'ai',l:'🤖 Assistente'},
-    {k:'cad',l:'🗂️ Cadastros'},{k:'favs',l:'👥 Favorecidos'},
-    {k:'cpr',l:'💳 Contas a Pagar'},{k:'emailcfg',l:'📧 E-mail'},{k:'docs',l:'📎 Documentos'},
-    {k:'bkp',l:'💾 Backup'},{k:'contab',l:'📤 Contabilidade'},{k:'adm',l:'⚙️ Administração'},
-    {k:'saldos',l:'💰 Ver saldos das contas'},{k:'editar',l:'✏️ Criar, alterar e excluir dados'}
-  ];
+  const MODS = MODS_PERM;
   const ed = podeEditar();
   let body='';
   if(tab==='usuarios'){
@@ -5620,7 +6298,7 @@ function refreshSide(){
   }
   updateEmpBar();
   const na = $('#navAdm'); if(na) na.style.display = (USER && hasPerm('adm')) ? 'block' : 'none';
-  ['dash','lanc','conc','rel','grupo','cad','favs','cpr','emailcfg','docs','contab','bkp'].forEach(mod=>{
+  ['dash','lanc','conc','rel','grupo','ca','cad','favs','cpr','emailcfg','docs','contab','bkp'].forEach(mod=>{
     const el=document.querySelector(`#nav [data-v="${mod}"]`);
     if(el) el.style.display = hasPerm(mod)?'':'none';
   });
